@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/track.dart';
+import '../models/audio_quality.dart';
 import 'audio_download_service.dart';
 
 /// A live snapshot of an in-flight download.
@@ -13,14 +14,15 @@ import 'audio_download_service.dart';
 /// was a tautology guarding unreachable state.
 class DownloadTask {
   final Track track;
+  final AudioQualityOption? quality;
 
   /// 0..1, or 0 when the server sent no content length.
   final double fraction;
 
-  const DownloadTask({required this.track, this.fraction = 0.0});
+  const DownloadTask({required this.track, this.quality, this.fraction = 0.0});
 
   DownloadTask copyWith({double? fraction}) =>
-      DownloadTask(track: track, fraction: fraction ?? this.fraction);
+      DownloadTask(track: track, quality: quality, fraction: fraction ?? this.fraction);
 }
 
 /// Tracks user-initiated downloads with live progress so any screen can render
@@ -57,16 +59,17 @@ class DownloadManager {
   bool isDownloading(String trackId) => _tasks.containsKey(trackId);
 
   /// Starts downloading [track] (idempotent). Observe progress via [updates].
-  Future<void> startDownload(Track track) async {
+  Future<void> startDownload(Track track, {AudioQualityOption? quality}) async {
     // Claim the slot synchronously, before any await. Checking `isDownloaded`
     // first meant two rapid taps could both clear the guard during that await
     // and start the same download twice.
     if (_tasks.containsKey(track.id)) return;
-    _tasks[track.id] = DownloadTask(track: track);
+    final storedTrack = quality?.id == null ? track : track.copyWith(qualityId: quality!.id);
+    _tasks[track.id] = DownloadTask(track: storedTrack, quality: quality);
     _notify(track.id);
     try {
       // ensureDownloaded is itself a no-op when the file is already on disk.
-      await AudioDownloadService.ensureDownloaded(track);
+      await AudioDownloadService.ensureDownloaded(storedTrack, quality: quality);
     } catch (e) {
       debugPrint('Download failed: $e');
       if (!_errorController.isClosed) _errorController.add('$e');

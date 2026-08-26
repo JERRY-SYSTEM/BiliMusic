@@ -46,6 +46,11 @@ void main() {
       expect(rt.audioUrl, isNull);
     });
 
+    test('selected audio quality survives the round-trip', () {
+      final rt = Track.fromMap(throughJson(_track().copyWith(qualityId: 30251).toMap()));
+      expect(rt.qualityId, 30251);
+    });
+
     test('tolerates unknown extra keys (older writer)', () {
       final map = throughJson(_track().toMap());
       map['uploaderFace'] = 'https://example.com/face.jpg';
@@ -100,6 +105,13 @@ void main() {
       final decoded = throughJson(pl.toMap());
       expect(decoded.containsKey('coverUrl'), isFalse);
       expect(Playlist.fromMap(decoded).coverUrl, isNull);
+    });
+
+    test('online playlist metadata survives the round-trip', () {
+      final pl = Playlist(id: 'online_1', name: '云歌单', remoteId: '1', isOnline: true, tracks: []);
+      final rt = Playlist.fromMap(throughJson(pl.toMap()));
+      expect(rt.isOnline, isTrue);
+      expect(rt.remoteId, '1');
     });
 
     test('tracks list is always growable (add-to-favorites regression)', () {
