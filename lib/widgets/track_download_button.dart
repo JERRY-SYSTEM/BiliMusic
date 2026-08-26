@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/track.dart';
+import '../models/audio_quality.dart';
+import '../services/app_settings_service.dart';
+import '../services/bili_auth_service.dart';
+import '../services/bilibili_sdk.dart';
 import '../services/audio_download_service.dart';
 import '../services/download_manager.dart';
 import '../theme/app_theme.dart';
@@ -87,7 +91,7 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
     // to a different track (didUpdateWidget swapped it). Only commit the
     // result if the widget still shows the track we asked about.
     final trackId = widget.track.id;
-    final downloaded = await AudioDownloadService.isDownloaded(widget.track);
+    final downloaded = await AudioDownloadService.isDownloaded(widget.track, quality: widget.track.qualityId);
     if (mounted && widget.track.id == trackId) {
       setState(() => _isDownloaded = downloaded);
     }
@@ -129,7 +133,7 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
           color: AppColors.textSecondary, size: widget.size);
       onTap = () {
         Haptics.light();
-        DownloadManager.instance.startDownload(widget.track);
+        _chooseQualityAndDownload();
       };
       tooltip = '下载';
     }
@@ -154,5 +158,33 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
         ),
       ),
     );
+  }
+
+  Future<void> _chooseQualityAndDownload() async {
+    final session = BiliAuthController.instance.session;
+    List<AudioQualityOption> options;
+    try {
+      options = await BilibiliSdk.fetchAudioQualities(widget.track.bvid, widget.track.cid,
+          cookies: session?.cookie, preferredQuality: AppSettingsService.instance.defaultAudioQuality);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('获取音质失败：$e')));
+      return;
+    }
+    if (!mounted || options.isEmpty) return;
+    final selected = await showModalBottomSheet<AudioQualityOption>(
+      context: context,
+      builder: (context) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const ListTile(title: Text('选择音质'), subtitle: Text('下载后将按音质分别缓存')),
+        ...options.map((option) => ListTile(
+          title: Text(option.label), subtitle: Text(option.bandwidth > 0 ? '${option.bandwidth ~/ 1000} kbps' : ''),
+          trailing: option.id == AppSettingsService.instance.defaultAudioQuality ? const Icon(Icons.check) : null,
+          onTap: () => Navigator.pop(context, option),
+        )),
+      ])),
+    );
+    if (selected != null) {
+      await AppSettingsService.instance.setDefaultAudioQuality(selected.id ?? 0);
+      await DownloadManager.instance.startDownload(widget.track, quality: selected);
+    }
   }
 }

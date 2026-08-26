@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
+import '../models/audio_quality.dart';
+import 'bili_auth_service.dart';
 import 'bili_http.dart';
 import 'bilibili_sdk.dart';
 import 'database_service.dart';
@@ -79,9 +81,9 @@ class AudioDownloadService {
   static String _key(Track track) =>
       track.id.isNotEmpty ? track.id : track.bvid;
 
-  static String _audioPath(String dir, String key) => '$dir/audio_$key.m4a';
-  static String _readyPath(String dir, String key) => '$dir/audio_$key.ready';
-  static String _metaPath(String dir, String key) => '$dir/audio_$key.json';
+  static String _audioPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.m4a' : '$dir/audio_${key}_$quality.m4a';
+  static String _readyPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.ready' : '$dir/audio_${key}_$quality.ready';
+  static String _metaPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.json' : '$dir/audio_${key}_$quality.json';
 
   /// Saves track metadata JSON next to the audio file (used for rediscovery).
   ///
@@ -121,24 +123,25 @@ class AudioDownloadService {
   static const int _memoCap = 1024;
 
   /// True when a complete, verified audio file exists on disk for [track].
-  static Future<bool> isDownloaded(Track track) => isDownloadedById(_key(track));
+  static Future<bool> isDownloaded(Track track, {int? quality}) => isDownloadedById(_key(track), quality: quality);
 
   /// String-id variant of [isDownloaded] for callers that only hold an id.
-  static Future<bool> isDownloadedById(String id) async {
-    final memo = _downloadedMemo[id];
+  static Future<bool> isDownloadedById(String id, {int? quality}) async {
+    final cacheKey = '${id}_${quality ?? 0}';
+    final memo = _downloadedMemo[cacheKey];
     if (memo != null) return memo;
-    final result = await _statDownloaded(id);
-    _downloadedMemo[id] = result;
+    final result = await _statDownloaded(id, quality);
+    _downloadedMemo[cacheKey] = result;
     if (_downloadedMemo.length > _memoCap) {
       _downloadedMemo.remove(_downloadedMemo.keys.first);
     }
     return result;
   }
 
-  static Future<bool> _statDownloaded(String id) async {
+  static Future<bool> _statDownloaded(String id, int? quality) async {
     final dir = await _dir();
-    final audio = File(_audioPath(dir, id));
-    final ready = File(_readyPath(dir, id));
+    final audio = File(_audioPath(dir, id, quality));
+    final ready = File(_readyPath(dir, id, quality));
     if (!await ready.exists()) return false;
     if (!await audio.exists()) return false;
     return await audio.length() > 0;
@@ -146,15 +149,15 @@ class AudioDownloadService {
 
   /// Removes a track's audio, ready-marker and metadata from disk.
   /// Returns true when something was actually deleted.
-  static Future<bool> delete(Track track) async {
+  static Future<bool> delete(Track track, {int? quality}) async {
     final dir = await _dir();
     final id = _key(track);
     var deleted = false;
     for (final path in [
-      _readyPath(dir, id),
-      _audioPath(dir, id),
-      _metaPath(dir, id),
-      '${_audioPath(dir, id)}.part',
+      _readyPath(dir, id, quality),
+      _audioPath(dir, id, quality),
+      _metaPath(dir, id, quality),
+      '${_audioPath(dir, id, quality)}.part',
     ]) {
       final file = File(path);
       try {
@@ -166,7 +169,7 @@ class AudioDownloadService {
         debugPrint('delete download error: $e');
       }
     }
-    _downloadedMemo[id] = false;
+    _downloadedMemo['${id}_${quality ?? 0}'] = false;
     return deleted;
   }
 
@@ -174,32 +177,44 @@ class AudioDownloadService {
   ///
   /// Idempotent and concurrency-safe: a second call for the same track while a
   /// download is in flight awaits the same future instead of downloading twice.
-  static Future<String> ensureDownloaded(Track track) async {
+  static Future<String> ensureDownloaded(Track track, {AudioQualityOption? quality}) async {
+    if (quality == null && track.qualityId != null) {
+      final options = await BilibiliSdk.fetchAudioQualities(track.bvid, track.cid,
+          cookies: BiliAuthController.instance.session?.cookie,
+          preferredQuality: track.qualityId);
+      for (final option in options) {
+        if (option.id == track.qualityId) {
+          quality = option;
+          break;
+        }
+      }
+    }
     final dir = await _dir();
     final id = _key(track);
-    final path = _audioPath(dir, id);
+    final path = _audioPath(dir, id, quality?.id);
     await saveTrackMetadata(track);
     // Already on disk: no DB write either — registration happens at download
     // time (below) and at library load, so replaying every track start would
     // just be an O(n) scan over the library for nothing.
-    if (await isDownloadedById(id)) {
+    if (await isDownloadedById(id, quality: quality?.id)) {
       return path;
     }
 
-    final existing = _inFlight[id];
+    final flightKey = '${id}_${quality?.id ?? 0}';
+    final existing = _inFlight[flightKey];
     if (existing != null) return existing;
 
-    final future = _download(track, dir, path);
-    _inFlight[id] = future;
+    final future = _download(track, dir, path, quality);
+    _inFlight[flightKey] = future;
     try {
       return await future;
     } finally {
-      _inFlight.remove(id);
+      _inFlight.remove(flightKey);
     }
   }
 
-  static Future<String> _download(Track track, String dir, String path) async {
-    var url = track.audioUrl;
+  static Future<String> _download(Track track, String dir, String path, AudioQualityOption? quality) async {
+    var url = quality?.url ?? track.audioUrl;
     if (url == null || url.isEmpty) {
       final info = await BilibiliSdk.fetchAudioStream(track.bvid, track.cid);
       url = info?['url'];
@@ -239,9 +254,9 @@ class AudioDownloadService {
           await destination.delete();
         }
         await tmp.rename(path);
-        await File(_readyPath(dir, _key(track))).create();
+        await File(_readyPath(dir, _key(track), quality?.id)).create();
         await saveTrackMetadata(track);
-        _downloadedMemo[_key(track)] = true;
+        _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
         _emit(DownloadProgress(track.id, existing, existing, true, null));
         await DatabaseService.saveDownloadedTrack(track);
         return path;
@@ -306,9 +321,9 @@ class AudioDownloadService {
         await destination.delete();
       }
       await tmp.rename(path);
-      await File(_readyPath(dir, _key(track))).create();
+      await File(_readyPath(dir, _key(track), quality?.id)).create();
       await saveTrackMetadata(track);
-      _downloadedMemo[_key(track)] = true;
+      _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
 
       _emit(DownloadProgress(track.id, received, total, true, null));
       await DatabaseService.saveDownloadedTrack(track);

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/track.dart';
+import '../models/audio_quality.dart';
 import 'bili_http.dart';
 import 'fingerprint_service.dart';
 import 'wbi_signer.dart';
@@ -116,6 +117,13 @@ class BilibiliSdk {
 
   // Fetch audio stream URL (prefers standard MP4/M4A container for native MediaPlayer compatibility)
   static Future<Map<String, String>?> fetchAudioStream(String bvid, int cid) async {
+    final options = await fetchAudioQualities(bvid, cid);
+    if (options.isEmpty) return null;
+    final item = options.first;
+    return {'url': item.url, 'quality': item.label, 'qualityId': '${item.id ?? 0}'};
+  }
+
+  static Future<List<AudioQualityOption>> fetchAudioQualities(String bvid, int cid, {String? cookies, int? preferredQuality}) async {
     try {
       if (cid == 0) {
         final infoList = await fetchVideoInfo(bvid);
@@ -123,66 +131,59 @@ class BilibiliSdk {
           cid = infoList.first.cid;
         }
       }
-      if (cid == 0) return null;
+      if (cid == 0) return const <AudioQualityOption>[];
 
       // fnval=16 requests DASH; the response still carries a plain `durl`
       // MP4/M4A stream for most videos, which we prefer for native playback.
-      final rawParams = {
+      final rawParams = <String, dynamic>{
         'bvid': bvid,
         'cid': cid,
         'fnval': 16,
         'fnver': 0,
         'fourk': 1,
+        'qn': preferredQuality ?? 80,
       };
 
       final signed = await WbiSigner.signParams(rawParams);
       final queryStr = signed.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value.toString())}').join('&');
       final url = '$_baseUrl/x/player/wbi/playurl?$queryStr';
 
-      final body = await _httpGet(url);
+      final body = await _httpGet(url, cookies: cookies);
       if (body != null) {
         final json = jsonDecode(body);
         if (json['code'] == 0 && json['data'] != null) {
-          // Check durl list (standard m4a/mp4 container)
           final durlList = json['data']?['durl'] as List? ?? [];
           if (durlList.isNotEmpty) {
-            final streamUrl = durlList.first['url'] as String?;
+            final durl = Map<String, dynamic>.from(durlList.first as Map);
+            final streamUrl = durl['url'] as String?;
             if (streamUrl != null && streamUrl.isNotEmpty) {
-              return {
-                'url': streamUrl.replaceAll('http:', 'https:'),
-                'quality': '高品质 AAC/M4A',
-              };
+              return [AudioQualityOption(id: 80, label: '高品质 AAC/M4A', url: streamUrl.replaceAll('http:', 'https:'), bandwidth: 320000)];
             }
           }
-
-          // Fallback to DASH audio list if durl empty
           final audioList = json['data']?['dash']?['audio'] as List? ?? [];
-          if (audioList.isNotEmpty) {
-            audioList.sort((a, b) => (b['bandwidth'] as int? ?? 0) - (a['bandwidth'] as int? ?? 0));
-            final best = audioList.first;
-            // backupUrl is a List; reading it via the ?? chain would make
-            // `as String?` throw a TypeError when only the backup exists.
-            String? streamUrl = best['baseUrl'] as String? ?? best['base_url'] as String?;
+          final result = <AudioQualityOption>[];
+          for (final raw in audioList) {
+            final map = Map<String, dynamic>.from(raw as Map);
+            var streamUrl = map['baseUrl'] as String? ?? map['base_url'] as String?;
             if (streamUrl == null || streamUrl.isEmpty) {
-              final backup = best['backupUrl'];
-              if (backup is List && backup.isNotEmpty) {
-                streamUrl = backup.first as String?;
-              }
+              final backup = map['backupUrl'];
+              if (backup is List && backup.isNotEmpty) streamUrl = backup.first as String?;
             }
-            if (streamUrl != null && streamUrl.isNotEmpty) {
-              return {
-                'url': streamUrl.replaceAll('http:', 'https:'),
-                'quality': '320k DASH',
-              };
-            }
+            if (streamUrl == null || streamUrl.isEmpty) continue;
+            final id = (map['id'] as num?)?.toInt();
+            final bandwidth = (map['bandwidth'] as num?)?.toInt() ?? 0;
+            final label = id == 30251 ? 'Hi-Res / FLAC' : id == 30280 ? '192k' : id == 30232 ? '132k' : '${(bandwidth / 1000).round()}k';
+            result.add(AudioQualityOption(id: id, label: label, url: streamUrl.replaceAll('http:', 'https:'), bandwidth: bandwidth, requiresLogin: id == 30251 || id == 30280));
           }
+          result.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
+          return result;
         }
       }
     } catch (e) {
       debugPrint('Failed to fetch audio stream: $e');
     }
 
-    return null;
+    return const <AudioQualityOption>[];
   }
 
   // Search Bilibili catalog for ANY query

@@ -26,6 +26,7 @@ class Track {
   final String coverUrl;
   final int duration; // in seconds
   final String? audioUrl;
+  final int? qualityId;
 
   const Track({
     required this.id,
@@ -36,7 +37,7 @@ class Track {
     required this.uploader,
     required this.coverUrl,
     required this.duration,
-    this.audioUrl,
+    this.audioUrl, this.qualityId,
   });
 
   Map<String, dynamic> toMap() {
@@ -50,6 +51,7 @@ class Track {
       'coverUrl': coverUrl,
       'duration': duration,
       'audioUrl': audioUrl,
+      'qualityId': qualityId,
     };
   }
 
@@ -66,6 +68,7 @@ class Track {
       coverUrl: map['coverUrl'] ?? '',
       duration: map['duration'] ?? 0,
       audioUrl: map['audioUrl'],
+      qualityId: (map['qualityId'] as num?)?.toInt(),
     );
   }
 
@@ -75,6 +78,7 @@ class Track {
     String? coverUrl,
     int? duration,
     String? audioUrl,
+    int? qualityId,
   }) {
     return Track(
       id: id,
@@ -86,6 +90,7 @@ class Track {
       coverUrl: coverUrl ?? this.coverUrl,
       duration: duration ?? this.duration,
       audioUrl: audioUrl ?? this.audioUrl,
+      qualityId: qualityId ?? this.qualityId,
     );
   }
 
