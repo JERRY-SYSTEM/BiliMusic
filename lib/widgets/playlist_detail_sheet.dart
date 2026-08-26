@@ -27,6 +27,7 @@ class PlaylistDetailSheet extends StatefulWidget {
   final void Function(List<Track> tracks, {bool shuffle})? onPlayCollection;
   final VoidCallback? onPlaylistUpdated;
   final VoidCallback? onClose;
+  final Future<void> Function(Playlist playlist)? onSyncOnline;
 
   const PlaylistDetailSheet({
     super.key,
@@ -36,6 +37,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     this.onPlayCollection,
     this.onPlaylistUpdated,
     this.onClose,
+    this.onSyncOnline,
   });
 
   static Future<void> show(
@@ -46,6 +48,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     void Function(List<Track> tracks, {bool shuffle})? onPlayCollection,
     VoidCallback? onPlaylistUpdated,
     VoidCallback? onClose,
+    Future<void> Function(Playlist playlist)? onSyncOnline,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -59,6 +62,7 @@ class PlaylistDetailSheet extends StatefulWidget {
         onPlayCollection: onPlayCollection,
         onPlaylistUpdated: onPlaylistUpdated,
         onClose: onClose ?? () => Navigator.pop(context),
+        onSyncOnline: onSyncOnline,
       ),
     );
   }
@@ -116,6 +120,9 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         id: pl.id,
         name: pl.name,
         coverUrl: pl.coverUrl,
+        remoteId: pl.remoteId,
+        isOnline: pl.isOnline,
+        lastSyncedAt: pl.lastSyncedAt,
         tracks: pl.tracks,
       );
 
@@ -287,10 +294,14 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                       onPressed: _pickCover,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.add_rounded,
+                      icon: Icon(_currentPlaylist.isOnline
+                          ? Icons.cloud_sync_outlined
+                          : Icons.add_rounded,
                           color: AppColors.textSecondary, size: 24),
-                      tooltip: '添加本地曲目',
-                      onPressed: _openAddLocalTracksSheet,
+                      tooltip: _currentPlaylist.isOnline ? '同步在线歌单' : '添加本地曲目',
+                      onPressed: _currentPlaylist.isOnline
+                          ? () => widget.onSyncOnline?.call(_currentPlaylist)
+                          : _openAddLocalTracksSheet,
                     ),
                   ],
                 ],
@@ -541,11 +552,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(
                     minWidth: 40, minHeight: 40),
-                onPressed: () {
-                  TrackOptionsMenu.showAddToPlaylist(
-                      context, track,
-                      onTrackChanged: _refresh);
-                },
+                onPressed: () => TrackOptionsMenu.showAddToPlaylist(
+                    context, track, onTrackChanged: _refresh),
               ),
             ],
           ],
