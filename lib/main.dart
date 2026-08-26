@@ -7,10 +7,13 @@ import 'package:flutter/services.dart';
 import 'models/track.dart';
 import 'models/playlist.dart';
 import 'models/lyric_line.dart';
+import 'models/bili_favorite_collection.dart';
 import 'services/lyrics_engine.dart';
 import 'services/database_service.dart';
 import 'services/audio_player_handler.dart';
 import 'services/audio_download_service.dart';
+import 'services/bili_auth_service.dart';
+import 'services/bili_favorites_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/haptics.dart';
 import 'theme/motion.dart';
@@ -22,6 +25,8 @@ import 'widgets/playlist_detail_sheet.dart';
 import 'widgets/segment_tabs.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
+import 'widgets/bili_auth_page.dart';
+import 'widgets/favorite_import_dialogs.dart';
 
 import 'package:audio_service/audio_service.dart';
 
@@ -168,12 +173,15 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   void initState() {
     super.initState();
+    BiliAuthController.instance.addListener(_onAuthChanged);
+    unawaited(BiliAuthController.instance.initialize());
     _initListeners();
     _loadHistory();
   }
 
   @override
   void dispose() {
+    BiliAuthController.instance.removeListener(_onAuthChanged);
     for (final s in _subs) {
       s.cancel();
     }
@@ -186,6 +194,82 @@ class _MainLayoutState extends State<MainLayout> {
     _pageFraction.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openLogin() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BiliAuthPage()));
+  }
+
+  Future<void> _importFavorites() async {
+    final auth = BiliAuthController.instance;
+    if (auth.session?.isLoggedIn != true) {
+      final login = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.backgroundElevated,
+          title: const Text('需要登录', style: TextStyle(color: AppColors.textPrimary)),
+          content: const Text('请先登录 B 站账号，再导入收藏夹。', style: TextStyle(color: AppColors.textSecondary)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去登录', style: TextStyle(color: AppColors.accent))),
+          ],
+        ),
+      );
+      if (login == true) await _openLogin();
+      return;
+    }
+    final collection = await showDialog<BiliFavoriteCollection>(
+      context: context,
+      builder: (_) => FavoritePickerDialog(session: auth.session!),
+    );
+    if (!mounted || collection == null) return;
+    final tracks = await showDialog<List<Track>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => FavoriteTracksDialog(session: auth.session!, collection: collection),
+    );
+    if (!mounted || tracks == null || tracks.isEmpty) return;
+    final destination = await _showImportDestination();
+    if (!mounted || destination == null) return;
+    Playlist target;
+    if (destination.existingId != null) {
+      target = (await DatabaseService.getPlaylists()).firstWhere((p) => p.id == destination.existingId);
+    } else {
+      target = await DatabaseService.createPlaylist(destination.name!.isEmpty ? collection.name : destination.name!);
+      if (collection.coverUrl?.isNotEmpty == true) await DatabaseService.setPlaylistCover(target.id, collection.coverUrl);
+    }
+    final before = target.tracks.length;
+    await DatabaseService.addTracksToPlaylist(target.id, tracks);
+    final after = (await DatabaseService.getPlaylists()).firstWhere((p) => p.id == target.id).tracks.length;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${after - before} 首，跳过 ${tracks.length - (after - before)} 首')));
+  }
+
+  Future<ImportDestination?> _showImportDestination() async {
+    final playlists = (await DatabaseService.getPlaylists()).where((p) => p.id != Playlist.favoritesId).toList();
+    final nameController = TextEditingController();
+    String? existingId;
+    bool createNew = true;
+    final result = await showDialog<ImportDestination>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
+        backgroundColor: AppColors.backgroundElevated,
+        title: const Text('选择导入目标', style: TextStyle(color: AppColors.textPrimary)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          RadioListTile<bool>(value: true, groupValue: createNew, onChanged: (v) => setDialogState(() => createNew = true), title: const Text('新建本地歌单')),
+          if (createNew) TextField(controller: nameController, decoration: const InputDecoration(hintText: '歌单名称')),
+          RadioListTile<bool>(value: false, groupValue: createNew, onChanged: playlists.isEmpty ? null : (v) => setDialogState(() { createNew = false; existingId ??= playlists.first.id; }), title: const Text('添加到已有歌单')),
+          if (!createNew && playlists.isNotEmpty) DropdownButton<String>(value: existingId ?? playlists.first.id, isExpanded: true, items: playlists.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))).toList(), onChanged: (v) => setDialogState(() => existingId = v)),
+          if (!createNew && playlists.isEmpty) const Text('暂无可用本地歌单'),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), TextButton(onPressed: !createNew && playlists.isEmpty ? null : () => Navigator.pop(ctx, createNew ? ImportDestination.newPlaylist(nameController.text.trim()) : ImportDestination.existing(existingId!)), child: const Text('导入', style: TextStyle(color: AppColors.accent)))],
+      )),
+    );
+    nameController.dispose();
+    return result;
   }
 
   void _initListeners() {
@@ -419,12 +503,21 @@ class _MainLayoutState extends State<MainLayout> {
                             onTap: _onTabTap,
                           ),
                         ),
-                        // The right-hand end of this row was dead space. The
-                        // mark closes it off and gives the header a shape,
-                        // which is what a header is for.
+                        IconButton(
+                          tooltip: BiliAuthController.instance.session?.isLoggedIn == true ? '已登录' : '登录',
+                          onPressed: _openLogin,
+                          icon: BiliAuthController.instance.session?.face?.isNotEmpty == true
+                              ? CircleAvatar(radius: 15, backgroundImage: NetworkImage(BiliAuthController.instance.session!.face!))
+                              : const Icon(Icons.account_circle_outlined, color: AppColors.textSecondary),
+                        ),
+                        IconButton(
+                          tooltip: '导入收藏夹',
+                          onPressed: _importFavorites,
+                          icon: const Icon(Icons.playlist_add_rounded, color: AppColors.textSecondary),
+                        ),
                         Padding(
-                          padding: const EdgeInsets.only(left: 12, right: 14),
-                          child: Image.asset('assets/logo.png', height: 36),
+                          padding: const EdgeInsets.only(left: 4, right: 6),
+                          child: Image.asset('assets/logo.png', height: 32),
                         ),
                       ],
                     ),
