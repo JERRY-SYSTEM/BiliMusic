@@ -355,6 +355,15 @@ class DatabaseService {
     return newPlaylist;
   }
 
+  static Future<Playlist> createOnlinePlaylist({required String remoteId, required String name, String? coverUrl, required List<Track> tracks}) async {
+    await _ensureLoaded();
+    final playlist = Playlist(id: 'online_$remoteId', name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
+    _playlists.removeWhere((p) => p.remoteId == remoteId);
+    _playlists.add(playlist);
+    await _persistPlaylists();
+    return playlist;
+  }
+
   /// Renames a playlist.
   static Future<void> renamePlaylist(String playlistId, String newName) async {
     await _ensureLoaded();

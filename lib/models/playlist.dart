@@ -15,6 +15,9 @@ class Playlist {
   /// A local image path the user picked for this playlist, or null for the
   /// default artwork.
   final String? coverUrl;
+  final String? remoteId;
+  final bool isOnline;
+  final DateTime? lastSyncedAt;
 
   /// Mutated in place by the database layer (add/remove/metadata edits), so it
   /// must always be growable.
@@ -29,7 +32,7 @@ class Playlist {
     required this.id,
     required this.name,
     required List<Track> tracks,
-    this.coverUrl,
+    this.coverUrl, this.remoteId, this.isOnline = false, this.lastSyncedAt,
   }) : tracks = List<Track>.of(tracks);
 
   Map<String, dynamic> toMap() {
@@ -37,6 +40,9 @@ class Playlist {
       'id': id,
       'name': name,
       if (coverUrl != null) 'coverUrl': coverUrl,
+      if (remoteId != null) 'remoteId': remoteId,
+      'isOnline': isOnline,
+      if (lastSyncedAt != null) 'lastSyncedAt': lastSyncedAt!.toIso8601String(),
     };
   }
 
@@ -45,6 +51,9 @@ class Playlist {
       id: map['id'] ?? '',
       name: map['name'] ?? '未命名歌单',
       coverUrl: map['coverUrl'] as String?,
+      remoteId: map['remoteId'] as String?,
+      isOnline: map['isOnline'] == true,
+      lastSyncedAt: DateTime.tryParse(map['lastSyncedAt'] as String? ?? ''),
       tracks: tracks ?? [],
     );
   }

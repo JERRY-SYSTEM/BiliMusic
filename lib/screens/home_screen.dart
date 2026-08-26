@@ -23,6 +23,7 @@ class HomeScreen extends StatefulWidget {
   final TrackAction onSelectTrack;
   final TrackAction? onPlayOnly;
   final Function(Playlist)? onOpenPlaylist;
+  final VoidCallback? onImportOnlinePlaylist;
 
   /// Plays a whole collection. Loop-all; shuffle only when asked.
   final void Function(List<Track> tracks, {bool shuffle})? onPlayCollection;
@@ -34,6 +35,7 @@ class HomeScreen extends StatefulWidget {
     this.onPlayOnly,
     this.onOpenPlaylist,
     this.onPlayCollection,
+    this.onImportOnlinePlaylist,
   });
 
   @override
@@ -421,8 +423,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // Playlists other than 收藏, which has its own quick-access card.
-    final otherPlaylists =
-        _playlists.where((p) => p.id != Playlist.favoritesId).toList();
+    final onlinePlaylists = _playlists.where((p) => p.isOnline).toList();
+    final localPlaylists = _playlists.where((p) => !p.isOnline && p.id != Playlist.favoritesId).toList();
 
     // Slivers instead of one eager ListView(children:): long playlists and
     // an active download list only pay for the rows actually on screen. The
@@ -477,7 +479,10 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 24),
 
               // Playlists Section Header
-              const Text('我的歌单', style: AppTypography.title),
+              Row(children: [
+                const Expanded(child: Text('在线歌单', style: AppTypography.title)),
+                IconButton(onPressed: widget.onImportOnlinePlaylist, icon: const Icon(Icons.cloud_download_outlined), tooltip: '导入在线歌单'),
+              ]),
 
               const SizedBox(height: 12),
             ]),
@@ -500,10 +505,16 @@ class _HomeScreenState extends State<HomeScreen> {
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           sliver: SliverList.builder(
-            itemCount: otherPlaylists.length,
+            itemCount: onlinePlaylists.length,
             itemBuilder: (context, index) =>
-                _playlistBar(otherPlaylists[index]),
+                _playlistBar(onlinePlaylists[index]),
           ),
+        ),
+
+        SliverPadding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 12), sliver: const SliverToBoxAdapter(child: Text('本地歌单', style: AppTypography.title))),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          sliver: SliverList.builder(itemCount: localPlaylists.length, itemBuilder: (context, index) => _playlistBar(localPlaylists[index])),
         ),
 
         SliverPadding(

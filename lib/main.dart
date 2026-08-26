@@ -27,6 +27,7 @@ import 'widgets/segment_tabs.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
 import 'widgets/bili_auth_page.dart';
+import 'widgets/favorite_import_dialogs.dart';
 import 'widgets/settings_page.dart';
 
 import 'package:audio_service/audio_service.dart';
@@ -236,25 +237,21 @@ class _MainLayoutState extends State<MainLayout> {
       builder: (_) => FavoritePickerDialog(session: auth.session!),
     );
     if (!mounted || collection == null) return;
-final tracks = await showDialog<List<Track>>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => FavoriteTracksDialog(session: auth.session!, collection: collection),
-    );
-    if (!mounted || tracks == null || tracks.isEmpty) return;
-    final destination = await _showImportDestination();
-    if (!mounted || destination == null) return;
-    Playlist target;
-    if (destination.existingId != null) {
-      target = (await DatabaseService.getPlaylists()).firstWhere((p) => p.id == destination.existingId);
-    } else {
-      target = await DatabaseService.createPlaylist(destination.name!.isEmpty ? collection.name : destination.name!);
-      if (collection.coverUrl?.isNotEmpty == true) await DatabaseService.setPlaylistCover(target.id, collection.coverUrl);
+    final tracks = await BiliFavoritesService.fetchTracks(auth.session!, collection.id);
+    if (!mounted || tracks.isEmpty) return;
+    await DatabaseService.createOnlinePlaylist(remoteId: collection.id, name: collection.name, coverUrl: collection.coverUrl, tracks: tracks);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入在线歌单“${collection.name}”，共 ${tracks.length} 首')));
+  }
+
+  Future<void> _syncOnlinePlaylist(Playlist playlist) async {
+    final session = BiliAuthController.instance.session;
+    if (session == null || playlist.remoteId == null) return;
+    final tracks = await BiliFavoritesService.fetchTracks(session, playlist.remoteId!);
+    await DatabaseService.createOnlinePlaylist(remoteId: playlist.remoteId!, name: playlist.name, coverUrl: playlist.coverUrl, tracks: tracks);
+    if (mounted) {
+      setState(() => _activePlaylistSheet = null);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('在线歌单同步完成')));
     }
-    final before = target.tracks.length;
-    await DatabaseService.addTracksToPlaylist(target.id, tracks);
-    final after = (await DatabaseService.getPlaylists()).firstWhere((p) => p.id == target.id).tracks.length;
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${after - before} 首，跳过 ${tracks.length - (after - before)} 首')));
   }
 
   Future<ImportDestination?> _showImportDestination() async {
@@ -552,6 +549,7 @@ final tracks = await showDialog<List<Track>>(
                             onSelectTrack: _onPlayTrackAndExpand,
                             onPlayOnly: _onPlayTrackOnly,
                             onPlayCollection: _playCollection,
+                            onImportOnlinePlaylist: _importFavorites,
                             onOpenPlaylist: (pl) {
                               setState(() => _activePlaylistSheet = pl);
                             },
@@ -606,6 +604,7 @@ final tracks = await showDialog<List<Track>>(
                           onSelectTrack: _onPlayTrackAndExpand,
                           onPlayOnly: _onPlayTrackOnly,
                           onPlayCollection: _playCollection,
+                          onSyncOnline: _syncOnlinePlaylist,
                           onPlaylistUpdated: _loadHistory,
                           onClose: () =>
                               setState(() => _activePlaylistSheet = null),
