@@ -204,12 +204,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (playerIndex >= _queueSource.length) return;
     final logical = _queueBaseIndex + playerIndex;
     if (logical < 0 || logical >= _playlist.length) return;
-    if (logical == _currentIndex) return;
     final queuedChild = _queueSource.children[playerIndex];
     if (queuedChild is! ja.IndexedAudioSource) return;
     final queuedTag = queuedChild.tag;
     if (queuedTag is! Track) return;
     if (queuedTag.id != _playlist[logical].id) return;
+    // [_currentIndex] is deliberately updated optimistically by manual
+    // navigation so the controls feel immediate.  It can therefore already
+    // equal `logical` while the native player is still on the old queue item.
+    // Do not use the logical index as an early-return condition here: the
+    // queue item's Track tag is the source of truth for what is audible.
+    if (_currentIndex == logical && currentTrack?.id == queuedTag.id) return;
     _currentIndex = logical;
     _onActiveTrackChanged(_playlist[logical]);
   }
@@ -222,7 +227,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     unawaited(DatabaseService.addRecentlyPlayed(track));
     _duration = Duration(seconds: track.duration > 0 ? track.duration : 180);
     _durationController.add(_duration);
-    _broadcastState();
+    // iOS keeps the last MPNowPlayingInfo progress while a new AVPlayer item
+    // is being installed. Publish a fresh zero-position/loading snapshot
+    // immediately so Dynamic Island and Control Center cannot retain the
+    // completed position of the previous item.
+    _broadcastState(
+      processingOverride: AudioProcessingState.loading,
+      positionOverride: Duration.zero,
+      bufferedPositionOverride: Duration.zero,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -302,14 +315,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     // An explicit "next" always advances, even in repeat-one — matching every
     // mainstream player. Repeat-one only governs *automatic* advance.
-    if (_player.hasNext && _loopMode != LoopMode.one) {
-      // Gapless: the next file is already queued in the native player.
-      await _player.seekToNext();
-      return;
-    }
-
     final next = _currentIndex + 1;
     if (next < _playlist.length) {
+      // Use the same logical transition for both a prefetched and a not-yet-
+      // queued track.  Calling seekToNext() directly leaves [_currentIndex]
+      // stale until currentIndexStream happens to arrive; that event can be
+      // filtered while a queue rebuild is settling, leaving the audio and UI
+      // on different tracks.
       await _playAtIndex(next);
     } else if (_loopMode != LoopMode.off) {
       await _playAtIndex(0);
@@ -359,6 +371,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _onActiveTrackChanged(_playlist[index]);
       await _player.seek(Duration.zero, index: playerIndex);
       if (!_isPlaying) await _player.play();
+      // currentIndexStream is asynchronous and can be suppressed by a
+      // just_audio implementation when seeking to an already queued item.
+      // Reconcile after the seek as well, so the UI cannot remain on the
+      // previous track when the audio has already moved on.
+      _reconcileActiveTrack();
       return;
     }
     _currentIndex = index;
@@ -596,7 +613,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _broadcastState();
   }
 
-  void _broadcastState({AudioProcessingState? processingOverride}) {
+  void _broadcastState({
+    AudioProcessingState? processingOverride,
+    Duration? positionOverride,
+    Duration? bufferedPositionOverride,
+  }) {
     final playing = _player.playing;
     final mapped = const {
       ja.ProcessingState.idle: AudioProcessingState.idle,
@@ -620,8 +641,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       androidCompactActionIndices: const [0, 1, 2],
       processingState: processingOverride ?? mapped ?? AudioProcessingState.idle,
       playing: playing,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
+      updatePosition: positionOverride ?? _player.position,
+      bufferedPosition: bufferedPositionOverride ?? _player.bufferedPosition,
       speed: _player.speed,
       repeatMode: _loopMode == LoopMode.one
           ? AudioServiceRepeatMode.one
