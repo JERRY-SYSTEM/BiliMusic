@@ -10,6 +10,13 @@ import 'database_service.dart';
 
 enum LoopMode { off, all, one }
 
+class PlaybackQueueState {
+  const PlaybackQueueState({required this.queue, required this.currentIndex});
+
+  final List<Track> queue;
+  final int currentIndex;
+}
+
 /// Playback engine built on a native just_audio queue.
 ///
 /// Architecture (download-then-play):
@@ -70,6 +77,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       StreamController<bool>.broadcast();
   final StreamController<LoopMode> _loopModeController =
       StreamController<LoopMode>.broadcast();
+  final StreamController<PlaybackQueueState> _queueController =
+      StreamController<PlaybackQueueState>.broadcast();
 
   Duration _duration = Duration.zero;
 
@@ -79,6 +88,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Stream<Duration> get durationStream => _durationController.stream;
   Stream<bool> get shuffleStream => _shuffleController.stream;
   Stream<LoopMode> get loopModeStream => _loopModeController.stream;
+  Stream<PlaybackQueueState> get queueStream => _queueController.stream;
+
+  List<Track> get playbackQueue => List<Track>.unmodifiable(_playlist);
+  int get currentQueueIndex => _currentIndex;
 
   Track? get currentTrack =>
       (_currentIndex >= 0 && _currentIndex < _playlist.length)
@@ -90,6 +103,14 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   BiliBeatAudioHandler() {
     _initAudioPlayerListeners();
+  }
+
+  void _emitQueue() {
+    if (_queueController.isClosed) return;
+    _queueController.add(PlaybackQueueState(
+      queue: List<Track>.unmodifiable(_playlist),
+      currentIndex: _currentIndex,
+    ));
   }
 
   bool get autoAdvanceHeld => _autoAdvanceHolds > 0 && _loopMode != LoopMode.one;
@@ -177,6 +198,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Called whenever the actively-playing track changes (manual or auto).
   void _onActiveTrackChanged(Track track) {
+    _emitQueue();
     _announce(track);
     _prefetchNext();
   }
@@ -251,6 +273,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         ..clear()
         ..addAll(newQueue);
       if (_isShuffle) _applyShuffleOrder(pinned: track);
+      _emitQueue();
     }
     if (!_playlist.any((t) => t.id == track.id)) {
       _playlist.insert(0, track);
@@ -265,6 +288,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     final active = _playlist[index];
     _announce(active);
     _positionController.add(Duration.zero);
+    _emitQueue();
 
     await _startCurrent(autoplay: true);
   }
@@ -357,6 +381,119 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     await _playAtIndex(index);
   }
 
+  Future<void> removeQueueItemAt(int index) async {
+    if (index < 0 || index >= _playlist.length) return;
+    final removedId = _playlist[index].id;
+    final wasCurrent = index == _currentIndex;
+
+    _playlist.removeAt(index);
+    _naturalOrder.removeWhere((track) => track.id == removedId);
+
+    if (_playlist.isEmpty) {
+      _currentIndex = -1;
+      ++_startToken;
+      _isRebuilding = true;
+      try {
+        await _player.stop();
+        await _queueSource.clear();
+      } finally {
+        _isRebuilding = false;
+      }
+      _isPlaying = false;
+      _playerStateController.add(false);
+      _emitQueue();
+      _broadcastState();
+      return;
+    }
+
+    if (!wasCurrent) {
+      if (index < _currentIndex) _currentIndex--;
+      _emitQueue();
+      await _rebuildNativeQueueAtCurrent();
+      return;
+    }
+
+    final nextIndex = index < _playlist.length
+        ? index
+        : (_loopMode == LoopMode.off ? -1 : 0);
+    if (nextIndex < 0) {
+      _currentIndex = -1;
+      ++_startToken;
+      await _player.stop();
+      await _queueSource.clear();
+      _isPlaying = false;
+      _playerStateController.add(false);
+      _emitQueue();
+      _broadcastState();
+      return;
+    }
+
+    _currentIndex = nextIndex;
+    _emitQueue();
+    await _startCurrent(autoplay: true);
+  }
+
+  Future<void> reorderQueueItem(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= _playlist.length) return;
+    final resolved = newIndex.clamp(0, _playlist.length - 1).toInt();
+    if (oldIndex == resolved) return;
+
+    if (_isShuffle) {
+      // The visible shuffled order stays intact. The dragged IDs define the
+      // order to use when shuffle is later disabled.
+      final displayed = List<Track>.of(_playlist);
+      final moved = displayed.removeAt(oldIndex);
+      displayed.insert(resolved, moved);
+      final byId = {for (final track in _naturalOrder) track.id: track};
+      _naturalOrder
+        ..clear()
+        ..addAll(displayed.map((track) => byId[track.id] ?? track));
+    } else {
+      final moved = _playlist.removeAt(oldIndex);
+      _playlist.insert(resolved, moved);
+      final naturalMoved = _naturalOrder.removeAt(oldIndex);
+      _naturalOrder.insert(resolved, naturalMoved);
+      if (_currentIndex == oldIndex) {
+        _currentIndex = resolved;
+      } else if (oldIndex < _currentIndex && resolved >= _currentIndex) {
+        _currentIndex--;
+      } else if (oldIndex > _currentIndex && resolved <= _currentIndex) {
+        _currentIndex++;
+      }
+    }
+
+    _emitQueue();
+    await _rebuildNativeQueueAtCurrent();
+  }
+
+  Future<void> _rebuildNativeQueueAtCurrent() async {
+    final active = currentTrack;
+    if (active == null) return;
+    final position = _player.position;
+    final wasPlaying = _player.playing;
+    ++_startToken;
+    _isRebuilding = true;
+    try {
+      final path = await AudioDownloadService.ensureDownloaded(active);
+      await _queueSource.clear();
+      await _queueSource.add(ja.AudioSource.file(path, tag: active));
+      _queueBaseIndex = _currentIndex;
+      await _player.setAudioSource(
+        _queueSource,
+        initialIndex: 0,
+        initialPosition: position,
+      );
+      if (wasPlaying) await _player.play();
+    } catch (e) {
+      debugPrint('rebuild queue failed: $e');
+    } finally {
+      _isRebuilding = false;
+    }
+    _emitQueue();
+    _broadcastState();
+    if (wasPlaying && _loopMode != LoopMode.one) unawaited(_prefetchNext());
+  }
+
   /// Switch to a logical index and start it, reusing the native queue when the
   /// target is already the prefetched next item (so the transition is gapless).
   Future<void> _playAtIndex(int index) async {
@@ -402,6 +539,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_loopMode == mode) return;
     _loopMode = mode;
     _loopModeController.add(_loopMode);
+    _emitQueue();
     // just_audio's LoopMode.one repeats the *current* item of the queue, so no
     // rebuild is needed — the playing track keeps its position.
     await _player.setLoopMode(
@@ -420,6 +558,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_isShuffle == on) return;
     _isShuffle = on;
     _shuffleController.add(_isShuffle);
+    _emitQueue();
     if (_playlist.isEmpty) return;
 
     final current = currentTrack;
@@ -434,6 +573,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         ? -1
         : _playlist.indexWhere((t) => t.id == current.id);
     if (_currentIndex < 0) _currentIndex = 0;
+    _emitQueue();
 
     // Re-anchor the native window on the still-playing item and re-prefetch,
     // without ever touching playback of the current track.

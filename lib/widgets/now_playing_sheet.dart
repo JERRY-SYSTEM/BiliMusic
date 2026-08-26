@@ -18,6 +18,7 @@ import 'progress_ring.dart';
 import 'player_seek_bar.dart';
 import 'synced_lyrics_view.dart';
 import 'lyric_editor_dialog.dart';
+import 'player_queue_sheet.dart';
 
 /// Full-screen "now playing" surface.
 class NowPlayingSheet extends StatefulWidget {
@@ -482,6 +483,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                   tooltip: '编辑',
                   onPressed: () => _openEditor(lyricsTab: _showLyrics),
                 ),
+                _favoriteButton(),
               ],
             ),
             const SizedBox(height: 10),
@@ -511,12 +513,30 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        _favoriteButton(),
+        _modeButton(),
         _skipButton(Icons.skip_previous_rounded, _isActive ? _prev : null),
         _playButton(),
         _skipButton(Icons.skip_next_rounded, _isActive ? _next : null),
-        _modeButton(),
+        _queueButton(),
       ],
+    );
+  }
+
+  Widget _queueButton() {
+    final enabled = widget.handler.playbackQueue.isNotEmpty &&
+        widget.handler.currentTrack != null;
+    return SizedBox(
+      width: 48,
+      child: IconButton(
+        icon: Icon(Icons.queue_music_rounded,
+            color: enabled ? AppColors.textMuted : AppColors.textFaint,
+            size: 25),
+        tooltip: '播放列表',
+        onPressed: enabled
+            ? () => showPlayerQueueSheet(
+                context: context, handler: widget.handler)
+            : null,
+      ),
     );
   }
 
