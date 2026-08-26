@@ -12,6 +12,7 @@ import 'services/lyrics_engine.dart';
 import 'services/database_service.dart';
 import 'services/audio_player_handler.dart';
 import 'services/audio_download_service.dart';
+import 'services/app_settings_service.dart';
 import 'services/bili_auth_service.dart';
 import 'services/bili_favorites_service.dart';
 import 'theme/app_theme.dart';
@@ -26,7 +27,7 @@ import 'widgets/segment_tabs.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
 import 'widgets/bili_auth_page.dart';
-import 'widgets/favorite_import_dialogs.dart';
+import 'widgets/settings_page.dart';
 
 import 'package:audio_service/audio_service.dart';
 
@@ -82,6 +83,7 @@ BiliBeatAudioHandler get audioHandlerInstance {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppSettingsService.instance.initialize();
   PaintingBinding.instance.imageCache.maximumSizeBytes = 50 * 1024 * 1024;
   PaintingBinding.instance.imageCache.maximumSize = 60;
   // Edge to edge, with a transparent navigation bar and — the part that
@@ -123,11 +125,18 @@ class BiliBeatApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'BiliBeat',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      home: const MainLayout(),
+    final settings = AppSettingsService.instance;
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) => MaterialApp(
+        title: 'BiliBeat',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.build(ThemeMode.light, Color(settings.accentValue)),
+        darkTheme: AppTheme.build(ThemeMode.dark, Color(settings.accentValue)),
+        themeMode: settings.themeMode == 'system' ? ThemeMode.system :
+            settings.themeMode == 'light' ? ThemeMode.light : ThemeMode.dark,
+        home: const MainLayout(),
+      ),
     );
   }
 }
@@ -227,7 +236,7 @@ class _MainLayoutState extends State<MainLayout> {
       builder: (_) => FavoritePickerDialog(session: auth.session!),
     );
     if (!mounted || collection == null) return;
-    final tracks = await showDialog<List<Track>>(
+final tracks = await showDialog<List<Track>>(
       context: context,
       barrierDismissible: false,
       builder: (_) => FavoriteTracksDialog(session: auth.session!, collection: collection),
@@ -511,9 +520,9 @@ class _MainLayoutState extends State<MainLayout> {
                               : const Icon(Icons.account_circle_outlined, color: AppColors.textSecondary),
                         ),
                         IconButton(
-                          tooltip: '导入收藏夹',
-                          onPressed: _importFavorites,
-                          icon: const Icon(Icons.playlist_add_rounded, color: AppColors.textSecondary),
+                          tooltip: '设置',
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+                          icon: const Icon(Icons.settings_outlined, color: AppColors.textSecondary),
                         ),
                         Padding(
                           padding: const EdgeInsets.only(left: 4, right: 6),

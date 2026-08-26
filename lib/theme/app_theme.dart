@@ -128,6 +128,25 @@ class AppTypography {
 }
 
 class AppTheme {
+  static ThemeData build(ThemeMode mode, Color accent) {
+    final brightness = mode == ThemeMode.light ? Brightness.light : Brightness.dark;
+    final base = ThemeData(
+      brightness: brightness,
+      scaffoldBackgroundColor: brightness == Brightness.dark ? AppColors.background : const Color(0xFFF7F7F9),
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(seedColor: accent, brightness: brightness),
+      splashFactory: InkSparkle.splashFactory,
+    );
+    return base.copyWith(
+      textTheme: base.textTheme.copyWith(
+        displayLarge: AppTypography.display, displayMedium: AppTypography.titleLarge,
+        titleLarge: AppTypography.title, titleMedium: AppTypography.headline,
+        bodyLarge: AppTypography.body, bodyMedium: AppTypography.bodyMedium,
+        bodySmall: AppTypography.caption, labelSmall: AppTypography.overline,
+      ),
+      sliderTheme: SliderThemeData(activeTrackColor: accent, thumbColor: accent, overlayColor: accent.withValues(alpha: .14)),
+    );
+  }
   static ThemeData get darkTheme {
     final base = ThemeData(
       brightness: Brightness.dark,
