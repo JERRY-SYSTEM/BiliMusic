@@ -104,7 +104,7 @@ class MiniPlayer extends StatelessWidget {
             padding: EdgeInsets.only(bottom: bottomInset(context)),
             child: SizedBox(
               height: contentHeight,
-              child: currentTrack == null ? _emptyState() : _activePlayer(),
+              child: currentTrack == null ? _emptyState() : _activePlayer(context),
             ),
           ),
         ),
@@ -132,7 +132,7 @@ class MiniPlayer extends StatelessWidget {
     );
   }
 
-  Widget _activePlayer() {
+  Widget _activePlayer(BuildContext context) {
     final track = currentTrack!;
     return GestureDetector(
       onTap: onTap,
@@ -213,7 +213,7 @@ class MiniPlayer extends StatelessWidget {
                 // disc is right at 68pt in the middle of the player; shrunk
                 // onto a bar it was the loudest thing on the screen and fought
                 // the artwork it sits next to.
-                _playButton(),
+                _playButton(context),
                 _iconButton(
                   Icons.skip_next_rounded,
                   onPressed: () {
@@ -240,7 +240,7 @@ class MiniPlayer extends StatelessWidget {
     );
   }
 
-  Widget _playButton() {
+  Widget _playButton(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -257,12 +257,12 @@ class MiniPlayer extends StatelessWidget {
             // The page's primary control at bar scale: same gradient, same
             // glow, same white glyph. It is the one thing the eye tracks
             // across the morph, so it has to be the same thing.
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: AppColors.primaryGradient,
+              gradient: context.palette.primaryGradient,
               boxShadow: [
                 BoxShadow(
-                    color: AppColors.accent30,
+                    color: context.palette.accent30,
                     blurRadius: 14,
                     offset: Offset(0, 4)),
               ],
@@ -413,8 +413,8 @@ class _MiniSeekBarState extends State<_MiniSeekBar> {
                                 child: FractionallySizedBox(
                                   widthFactor: fraction,
                                   heightFactor: 1,
-                                  child: const ColoredBox(
-                                      color: AppColors.accent),
+                                  child: ColoredBox(
+                                      color: context.palette.accent),
                                 ),
                               ),
                             ],

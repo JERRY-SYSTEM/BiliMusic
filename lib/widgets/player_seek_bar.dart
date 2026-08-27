@@ -37,8 +37,8 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
 
   @override
   Widget build(BuildContext context) {
-    const timeStyle = TextStyle(
-      color: AppColors.textMuted,
+    final timeStyle = TextStyle(
+      color: context.palette.textMuted,
       fontSize: 12,
       fontFeatures: [FontFeature.tabularFigures()],
     );
@@ -63,16 +63,16 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
-                activeTrackColor: AppColors.accent,
-                thumbColor: AppColors.accent,
-                overlayColor: AppColors.accent22,
+                activeTrackColor: context.palette.accent,
+                thumbColor: context.palette.accent,
+                overlayColor: context.palette.accent.withValues(alpha: .14),
                 thumbShape:
                     const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape:
                     const RoundSliderOverlayShape(overlayRadius: 14),
                 disabledActiveTrackColor: AppColors.hairlineStrong,
                 disabledInactiveTrackColor: AppColors.hairline,
-                disabledThumbColor: AppColors.textFaint,
+                disabledThumbColor: context.palette.textFaint,
               ),
               child: Slider(
                 value: posSec,

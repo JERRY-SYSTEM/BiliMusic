@@ -122,7 +122,7 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
       tooltip = '下载中';
     } else if (_isDownloaded) {
       glyph = Icon(Icons.play_circle_fill,
-          color: AppColors.accent, size: widget.size + 4);
+          color: context.palette.accent, size: widget.size + 4);
       onTap = () {
         Haptics.light();
         widget.onPlay?.call();

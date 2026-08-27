@@ -96,8 +96,8 @@ class LyricPreviewPane extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: calibrating ? onApply : onStartCalibrating,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: calibrating ? AppColors.accent : AppColors.textMuted,
-                    side: BorderSide(color: calibrating ? AppColors.accent30 : AppColors.white24),
+                    foregroundColor: calibrating ? context.palette.accent : context.palette.textMuted,
+                    side: BorderSide(color: calibrating ? context.palette.accent30 : AppColors.white24),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
@@ -115,7 +115,7 @@ class LyricPreviewPane extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: onApply,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.accent,
+                      backgroundColor: context.palette.accent,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                     ),

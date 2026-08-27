@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../models/track.dart';
 import '../services/audio_player_handler.dart';
@@ -68,15 +69,13 @@ class PlayerQueueSheet extends StatelessWidget {
                               Haptics.medium();
                               handler.cyclePlayMode();
                             },
-                      icon: Icon(
-                        handler.isShuffle
-                            ? Icons.shuffle_rounded
+                      icon: HugeIcon(
+                        icon: handler.isShuffle
+                            ? HugeIcons.strokeRoundedShuffle
                             : handler.loopMode == LoopMode.one
-                                ? Icons.repeat_one_rounded
-                                : Icons.repeat_rounded,
-                        color: handler.isShuffle || handler.loopMode == LoopMode.one
-                          ? context.palette.accent
-                              : context.palette.textSecondary,
+                                ? HugeIcons.strokeRoundedRepeatOne01
+                                : HugeIcons.strokeRoundedRepeat,
+                        color: context.palette.textSecondary,
                       ),
                     ),
                     IconButton(

@@ -275,13 +275,14 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
 
   Widget _buildPlaceholder() {
     return Container(
+      key: const Key('coverLoadingPlaceholder'),
       width: widget.width,
       height: widget.height,
-      color: AppColors.surfaceDeep,
+      color: context.palette.surfaceDeep,
       child: Center(
         child: Icon(
           Icons.music_note_rounded,
-          color: AppColors.textFaint,
+          color: context.palette.textFaint,
           size: (widget.width * 0.28).clamp(14.0, 40.0),
         ),
       ),
@@ -290,25 +291,26 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
 
   Widget _buildFallback() {
     return Container(
-          width: widget.width,
-          height: widget.height,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppColors.accent.withValues(alpha: 0.35),
-                AppColors.surfaceNeutralDeep,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.music_note_rounded,
-              color: AppColors.accent,
-              size: (widget.width * 0.4).clamp(24.0, 80.0),
-            ),
-          ),
-        );
+      key: const Key('coverFallback'),
+      width: widget.width,
+      height: widget.height,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            context.palette.accent.withValues(alpha: 0.22),
+            context.palette.surfaceDeep,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.music_note_rounded,
+          color: context.palette.accent,
+          size: (widget.width * 0.4).clamp(24.0, 80.0),
+        ),
+      ),
+    );
   }
 }

@@ -31,10 +31,10 @@ class EmptyState extends StatelessWidget {
             height: _medallion,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const RadialGradient(
+              gradient: RadialGradient(
                 colors: [
-                  AppColors.accent22,
-                  AppColors.accent04,
+                  context.palette.accent14,
+                  context.palette.accent04,
                 ],
               ),
               border: Border.all(color: AppColors.hairline),
@@ -42,7 +42,7 @@ class EmptyState extends StatelessWidget {
             child: Icon(
               icon,
               size: _medallion * 0.42,
-              color: AppColors.accent,
+              color: context.palette.accent,
             ),
           ),
           const SizedBox(height: 18),

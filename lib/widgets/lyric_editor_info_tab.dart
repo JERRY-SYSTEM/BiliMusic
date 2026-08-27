@@ -85,21 +85,21 @@ class LyricEditorInfoTab extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: parsing ? null : onAutoParse,
                     icon: parsing
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: AppColors.accent),
+                                strokeWidth: 2, color: context.palette.accent),
                           )
-                        : const Icon(Icons.auto_awesome, color: AppColors.accent, size: 18),
-                    label: const Text('智能识别歌名与歌手',
+                        : Icon(Icons.auto_awesome, color: context.palette.accent, size: 18),
+                    label: Text('智能识别歌名与歌手',
                         style: TextStyle(
-                            color: AppColors.accent,
+                            color: context.palette.accent,
                             fontSize: 14,
                             fontWeight: FontWeight.w600)),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.accent30),
-                      backgroundColor: AppColors.accent14,
+                      side: BorderSide(color: context.palette.accent30),
+                      backgroundColor: context.palette.accent14,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(AppRadius.md),
                       ),

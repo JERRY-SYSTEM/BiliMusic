@@ -13,7 +13,7 @@ void showAppSnackBar(
   ScaffoldMessengerState messenger, {
   required String message,
   IconData? icon,
-  Color backgroundColor = AppColors.accent,
+  Color? backgroundColor,
   Duration duration = const Duration(seconds: 2),
 }) {
   final Widget content;
@@ -28,7 +28,7 @@ void showAppSnackBar(
   } else {
     content = Row(
       children: [
-        Icon(icon, color: AppColors.accent, size: 20),
+        Icon(icon, color: messenger.context.palette.accent, size: 20),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -51,7 +51,7 @@ void showAppSnackBar(
 
   messenger.showSnackBar(SnackBar(
     content: content,
-    backgroundColor: backgroundColor,
+    backgroundColor: backgroundColor ?? messenger.context.palette.accent,
     behavior: behavior,
     margin: margin,
     shape: shape,

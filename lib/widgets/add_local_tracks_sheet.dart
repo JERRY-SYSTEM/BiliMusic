@@ -76,9 +76,9 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('添加本地曲目',
+              Text('添加本地曲目',
                   style: TextStyle(
-                      color: AppColors.textPrimary,
+                      color: context.palette.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.bold)),
               TextButton(
@@ -86,8 +86,8 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
                 child: Text('添加 (${_selectedIds.length})',
                     style: TextStyle(
                         color: _selectedIds.isEmpty
-                            ? AppColors.textFaint
-                            : AppColors.accent,
+                            ? context.palette.textFaint
+                            : context.palette.accent,
                         fontWeight: FontWeight.bold)),
               ),
             ],
@@ -113,24 +113,24 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           color: isAlreadyInPlaylist
-                              ? AppColors.textMuted
-                              : AppColors.textPrimary)),
+                              ? context.palette.textMuted
+                              : context.palette.textPrimary)),
                   subtitle: Text(t.uploader,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: AppColors.textMuted, fontSize: 12)),
+                      style: TextStyle(
+                          color: context.palette.textMuted, fontSize: 12)),
                   trailing: isAlreadyInPlaylist
-                      ? const Text('已在歌单',
+                      ? Text('已在歌单',
                           style: TextStyle(
-                              color: AppColors.textFaint, fontSize: 12))
+                              color: context.palette.textFaint, fontSize: 12))
                       : Icon(
                           isChecked
                               ? Icons.check_circle_rounded
                               : Icons.radio_button_unchecked_rounded,
                           color: isChecked
-                              ? AppColors.accent
-                              : AppColors.textFaint,
+                              ? context.palette.accent
+                              : context.palette.textFaint,
                         ),
                   onTap: isAlreadyInPlaylist
                       ? null

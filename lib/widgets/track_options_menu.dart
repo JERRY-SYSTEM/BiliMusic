@@ -63,24 +63,24 @@ class TrackOptionsMenu extends StatefulWidget {
                     children: [
                       Text(
                         tracks.length == 1 ? '加入歌单' : '批量加入歌单 (${tracks.length} 首)',
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.palette.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       TextButton.icon(
-                        icon: const Icon(Icons.add, color: AppColors.accent, size: 20),
-                        label: const Text('新建歌单', style: TextStyle(color: AppColors.accent)),
+                        icon: Icon(Icons.add, color: context.palette.accent, size: 20),
+                        label: Text('新建歌单', style: TextStyle(color: context.palette.accent)),
                         onPressed: () async {
                           final controller = TextEditingController();
                           final newPlName = await showDialog<String>(
                             context: ctx,
                             builder: (dCtx) => AlertDialog(
                               backgroundColor: AppColors.backgroundElevated,
-                              title: const Text('新建歌单', style: TextStyle(color: AppColors.textPrimary)),
+                              title: Text('新建歌单', style: TextStyle(color: context.palette.textPrimary)),
                               content: TextField(
                                 controller: controller,
-                                style: const TextStyle(color: AppColors.textPrimary),
-                                decoration: const InputDecoration(
+                                style: TextStyle(color: context.palette.textPrimary),
+                                decoration: InputDecoration(
                                   hintText: '歌单名称',
-                                  hintStyle: TextStyle(color: AppColors.textFaint),
+                                hintStyle: TextStyle(color: context.palette.textFaint),
                                 ),
                               ),
                               actions: [
@@ -89,7 +89,7 @@ class TrackOptionsMenu extends StatefulWidget {
                                   onPressed: () => Navigator.pop(dCtx),
                                 ),
                                 TextButton(
-                                  child: const Text('创建', style: TextStyle(color: AppColors.accent)),
+                                  child: Text('创建', style: TextStyle(color: context.palette.accent)),
                                   onPressed: () => Navigator.pop(dCtx, controller.text),
                                 ),
                               ],
@@ -126,10 +126,10 @@ class TrackOptionsMenu extends StatefulWidget {
                         return ListTile(
                           leading: Icon(
                             pl.id == Playlist.favoritesId ? Icons.favorite : Icons.queue_music,
-                            color: pl.id == Playlist.favoritesId ? AppColors.accent : AppColors.textSecondary,
+                            color: pl.id == Playlist.favoritesId ? context.palette.accent : context.palette.textSecondary,
                           ),
-                          title: Text(pl.name, style: const TextStyle(color: AppColors.textPrimary)),
-                          subtitle: Text('${pl.tracks.length} 首', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                          title: Text(pl.name, style: TextStyle(color: context.palette.textPrimary)),
+                          subtitle: Text('${pl.tracks.length} 首', style: TextStyle(color: context.palette.textMuted, fontSize: 12)),
                           onTap: () async {
                             await DatabaseService.addTracksToPlaylist(pl.id, tracks);
                             for (final t in tracks) {
@@ -245,7 +245,7 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
             width: 36,
             height: 5,
             decoration: BoxDecoration(
-              color: AppColors.textFaint,
+              color: context.palette.textFaint,
               borderRadius: BorderRadius.circular(3),
             ),
           ),
@@ -272,8 +272,8 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
                     // FULL Untruncated Track Title
                     Text(
                       widget.track.title,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
+                      style: TextStyle(
+                        color: context.palette.textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         height: 1.3,
@@ -284,8 +284,8 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
                       widget.track.uploader,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
+                      style: TextStyle(
+                        color: context.palette.textMuted,
                         fontSize: 13,
                       ),
                     ),
@@ -295,29 +295,29 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
             ],
           ),
 
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
-            child: Divider(color: AppColors.white12, height: 1),
+            child: Divider(color: context.palette.hairline, height: 1),
           ),
 
           // Action Items
           ListTile(
             leading: Icon(
               _isDownloaded ? Icons.delete_outline_rounded : Icons.download_rounded,
-              color: _isDownloaded ? AppColors.danger : AppColors.textPrimary,
+              color: _isDownloaded ? context.palette.danger : context.palette.textPrimary,
             ),
             title: Text(
               _isDownloaded ? '删除本地音频' : '下载到本地',
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
+              style: TextStyle(color: context.palette.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
             ),
             onTap: _handleDownload,
           ),
 
           ListTile(
-            leading: const Icon(Icons.playlist_add, color: AppColors.textPrimary),
-            title: const Text(
+            leading: Icon(Icons.playlist_add, color: context.palette.textPrimary),
+            title: Text(
               '加入歌单',
-              style: TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
+              style: TextStyle(color: context.palette.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
             ),
             onTap: _handleAddToPlaylist,
           ),
@@ -325,11 +325,11 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
           ListTile(
             leading: Icon(
               _isFav ? Icons.favorite : Icons.favorite_border,
-              color: _isFav ? AppColors.accent : AppColors.textPrimary,
+              color: _isFav ? context.palette.accent : context.palette.textPrimary,
             ),
             title: Text(
               _isFav ? '取消收藏' : '添加至收藏',
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
+              style: TextStyle(color: context.palette.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
             ),
             onTap: _handleFavorite,
           ),
