@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
 import 'cached_cover_image.dart';
 
-Future<void> showPlayerQueueSheet({
+  Future<void> showPlayerQueueSheet({
   required BuildContext context,
   required BiliBeatAudioHandler handler,
 }) {
@@ -14,7 +14,7 @@ Future<void> showPlayerQueueSheet({
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    backgroundColor: AppColors.backgroundElevated,
+    backgroundColor: context.palette.backgroundElevated,
     builder: (_) => SafeArea(child: PlayerQueueSheet(handler: handler)),
   );
 }
@@ -53,7 +53,7 @@ class PlayerQueueSheet extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('播放列表', style: AppTypography.title),
+                          Text('播放列表', style: AppTypography.title.copyWith(color: context.palette.textPrimary)),
                           const SizedBox(height: 4),
                           Text('${state.queue.length} 首 · $mode',
                               style: AppTypography.bodyMedium),
@@ -75,24 +75,51 @@ class PlayerQueueSheet extends StatelessWidget {
                                 ? Icons.repeat_one_rounded
                                 : Icons.repeat_rounded,
                         color: handler.isShuffle || handler.loopMode == LoopMode.one
-                            ? AppColors.accent
-                            : AppColors.textSecondary,
+                          ? context.palette.accent
+                              : context.palette.textSecondary,
                       ),
+                    ),
+                    IconButton(
+                      tooltip: '清空播放列表',
+                      onPressed: state.queue.isEmpty
+                          ? null
+                          : () async {
+                              Haptics.medium();
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (dialogContext) => AlertDialog(
+                                  title: const Text('清空播放列表'),
+                                  content: const Text('将清空所有曲目并停止当前播放，确定继续吗？'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dialogContext, false),
+                                      child: const Text('取消'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(dialogContext, true),
+                                      child: const Text('清空'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) await handler.clearQueue();
+                            },
+                      icon: const Icon(Icons.delete_sweep_rounded),
                     ),
                   ],
                 ),
               ),
               Expanded(
                 child: state.queue.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text('暂无播放曲目',
-                            style: TextStyle(color: AppColors.textSecondary)),
+                            style: TextStyle(color: context.palette.textSecondary)),
                       )
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                         buildDefaultDragHandles: false,
                         itemCount: state.queue.length,
-                        onReorder: handler.reorderQueueItem,
+                        onReorderItem: handler.reorderQueueItem,
                         itemBuilder: (context, index) {
                           final track = state.queue[index];
                           final current = index == state.currentIndex;
@@ -139,7 +166,7 @@ class _QueueRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
-        color: current ? AppColors.accent12 : AppColors.surfaceCard,
+        color: current ? context.palette.accentSoft : context.palette.surfaceCard,
         borderRadius: BorderRadius.circular(AppRadius.md),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadius.md),
