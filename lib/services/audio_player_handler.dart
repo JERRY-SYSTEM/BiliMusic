@@ -11,6 +11,7 @@ import 'package:just_audio/just_audio.dart' as ja;
 import '../models/track.dart';
 import 'audio_download_service.dart';
 import 'database_service.dart';
+import 'player_queue_manager.dart';
 
 enum LoopMode { off, all, one }
 
@@ -45,6 +46,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// The playlist in its natural order, kept so turning shuffle off restores
   /// exactly what the user had before.
   final List<Track> _naturalOrder = [];
+  final PlayerQueueManager _queueManager = PlayerQueueManager();
 
   int _currentIndex = -1;
 
@@ -163,6 +165,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _loopMode = LoopMode.values.firstWhere((m) => m.name == loop, orElse: () => LoopMode.all);
       _currentIndex = (map['currentIndex'] as num?)?.toInt() ?? 0;
       if (_currentIndex < 0 || _currentIndex >= _playlist.length) _currentIndex = 0;
+      _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
       _resumePosition = Duration(milliseconds: (map['positionMs'] as num?)?.toInt() ?? 0);
       _restoredWasPlaying = map['wasPlaying'] == true;
       _emitQueue();
@@ -307,6 +310,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Called whenever the actively-playing track changes (manual or auto).
   void _onActiveTrackChanged(Track track) {
+    _queueManager.recordVisit(
+      queue: _playlist,
+      index: _playlist.indexWhere((item) => item.id == track.id),
+      shuffle: _isShuffle,
+    );
     _emitQueue();
     _announce(track);
     _prefetchNext();
@@ -382,7 +390,6 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _playlist
         ..clear()
         ..addAll(newQueue);
-      if (_isShuffle) _applyShuffleOrder(pinned: track);
       _emitQueue();
       _schedulePersist(immediate: true);
     }
@@ -394,6 +401,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     var index = _playlist.indexWhere((t) => t.id == track.id);
     if (index == -1) index = 0;
     _currentIndex = index;
+    _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: index);
 
     // Announce immediately so the UI updates while the file downloads.
     final active = _playlist[index];
@@ -457,8 +465,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     // An explicit "next" always advances, even in repeat-one — matching every
     // mainstream player. Repeat-one only governs *automatic* advance.
-    final next = _currentIndex + 1;
-    if (next < _playlist.length) {
+    final next = _queueManager.next(
+      queue: _playlist,
+      currentIndex: _currentIndex,
+      shuffle: _isShuffle,
+    );
+    if (next != null && (next != 0 || _playlist.length == 1 || _isShuffle)) {
       // Use the same logical transition for both a prefetched and a not-yet-
       // queued track.  Calling seekToNext() directly leaves [_currentIndex]
       // stale until currentIndexStream happens to arrive; that event can be
@@ -483,8 +495,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
 
-    final prev = _currentIndex - 1;
-    if (prev >= 0) {
+    final prev = _queueManager.previous(
+      queue: _playlist,
+      currentIndex: _currentIndex,
+      shuffle: _isShuffle,
+    );
+    final canMovePrevious = _isShuffle
+        ? prev != null && (prev != _currentIndex || _playlist.length == 1)
+        : _currentIndex > 0;
+    if (prev != null && canMovePrevious) {
       await _playAtIndex(prev);
     } else if (_loopMode != LoopMode.off) {
       await _playAtIndex(_playlist.length - 1);
@@ -506,6 +525,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _playlist.removeAt(index);
     _naturalOrder.removeWhere((track) => track.id == removedId);
+    _queueManager.remove(removedId);
 
     if (_playlist.isEmpty) {
       _currentIndex = -1;
@@ -520,6 +540,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _isPlaying = false;
       _playerStateController.add(false);
       _emitQueue();
+      _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
       _broadcastState();
       _schedulePersist(immediate: true);
       return;
@@ -568,19 +589,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final activeId = currentTrack?.id;
     if (_isShuffle) {
-      // The visible shuffled order stays intact. The dragged IDs define the
-      // order to use when shuffle is later disabled.
-      final displayed = List<Track>.of(_playlist);
-      final moved = displayed.removeAt(oldIndex);
-      displayed.insert(resolved, moved);
-      _playlist
-        ..clear()
-        ..addAll(displayed);
+      final movedNatural = _naturalOrder.removeAt(oldIndex);
+      _naturalOrder.insert(resolved, movedNatural);
+      final moved = _playlist.removeAt(oldIndex);
+      _playlist.insert(resolved, moved);
       _currentIndex = _playlist.indexWhere((t) => t.id == activeId);
-      final byId = {for (final track in _naturalOrder) track.id: track};
-      _naturalOrder
-        ..clear()
-        ..addAll(displayed.map((track) => byId[track.id] ?? track));
     } else {
       final moved = _playlist.removeAt(oldIndex);
       _playlist.insert(resolved, moved);
@@ -594,6 +607,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         _currentIndex++;
       }
     }
+    _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
 
     _emitQueue();
     // Reorder only the children that are actually in the native window. The
@@ -620,6 +634,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     _playlist.clear();
     _naturalOrder.clear();
+    _queueManager.reset();
     _currentIndex = -1;
     _isPlaying = false;
     _userPaused = true;
@@ -680,6 +695,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
     _currentIndex = index;
+    _queueManager.recordVisit(queue: _playlist, index: index, shuffle: _isShuffle);
     final active = _playlist[index];
     _announce(active);
     _positionController.add(Duration.zero);
@@ -727,17 +743,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_playlist.isEmpty) return;
 
     final current = currentTrack;
-    if (on) {
-      _applyShuffleOrder(pinned: current);
-    } else {
-      _playlist
-        ..clear()
-        ..addAll(_naturalOrder);
+    _queueManager.reset();
+    if (current != null) {
+      _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
     }
-    _currentIndex = current == null
-        ? -1
-        : _playlist.indexWhere((t) => t.id == current.id);
-    if (_currentIndex < 0) _currentIndex = 0;
     _emitQueue();
 
     // Re-anchor the native window on the still-playing item and re-prefetch,
@@ -750,14 +759,36 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _schedulePersist(immediate: true);
   }
 
-  /// Reorders [_playlist] randomly, keeping [pinned] where it is so the
-  /// currently-playing track is never yanked out from under playback.
-  void _applyShuffleOrder({Track? pinned}) {
-    final others =
-        _naturalOrder.where((t) => t.id != pinned?.id).toList()..shuffle();
-    _playlist
-      ..clear()
-      ..addAll([if (pinned != null) pinned, ...others]);
+  /// Inserts a downloaded track immediately after the current track without
+  /// interrupting the current playback.
+  Future<void> playNext(Track track) async {
+    if (_playlist.isEmpty || _currentIndex < 0) {
+      await playTrack(track);
+      return;
+    }
+    if (_playlist.any((item) => item.id == track.id)) {
+      final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
+      if (oldIndex == _currentIndex + 1) return;
+      _playlist.removeAt(oldIndex);
+      _naturalOrder.removeWhere((item) => item.id == track.id);
+    }
+    final path = await AudioDownloadService.ensureDownloaded(track);
+    final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
+    _playlist.insert(insertIndex, track);
+    _naturalOrder.insert(insertIndex.clamp(0, _naturalOrder.length).toInt(), track);
+    _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
+    _queueManager.prioritizeNext(
+      queue: _playlist,
+      currentIndex: _currentIndex,
+      trackId: track.id,
+      shuffle: _isShuffle,
+    );
+    final nativeIndex = (_player.currentIndex ?? 0) + 1;
+    if (nativeIndex <= _queueSource.length) {
+      await _queueSource.insert(nativeIndex, ja.AudioSource.file(path, tag: track));
+    }
+    _emitQueue();
+    _schedulePersist(immediate: true);
   }
 
   // ---------------------------------------------------------------------------
@@ -801,6 +832,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       debugPrint('playTrack download failed: $e');
       if (token == _startToken) {
         _isRebuilding = false;
+        final next = _queueManager.nextAvailable(
+          queue: _playlist,
+          failedIndex: _currentIndex,
+          shuffle: _isShuffle,
+          skippedIds: <String>{active.id},
+        );
         // The start never landed: announce whatever the platform is really
         // playing (the old window may have advanced while we downloaded), so
         // the card does not stay stuck on a track that never started.
@@ -810,6 +847,9 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         // state to unpin the media session from the loading state pushed at
         // the top of this method.
         _broadcastState();
+        if (next != null && next != _currentIndex) {
+          unawaited(_playAtIndex(next));
+        }
       }
       return;
     }
@@ -892,6 +932,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     // Only the contiguous successor is prefetched: the window's player index
     // must stay a simple offset from the logical index. Wrapping past the end
     // is handled by [_handleQueueCompleted] instead.
+    if (_isShuffle) return;
     final nextIndex = _currentIndex + 1;
     if (nextIndex >= _playlist.length) return;
 
@@ -935,8 +976,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
 
-    final next = _currentIndex + 1;
-    if (next < _playlist.length) {
+    final next = _queueManager.next(
+      queue: _playlist,
+      currentIndex: _currentIndex,
+      shuffle: _isShuffle,
+    );
+    if (next != null && (next != 0 || _isShuffle || _playlist.length == 1)) {
       _playAtIndex(next);
       return;
     }
