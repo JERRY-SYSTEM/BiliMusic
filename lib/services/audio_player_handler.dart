@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 
 import '../models/track.dart';
@@ -53,6 +57,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _isShuffle = false;
   bool _isRebuilding = false;
   String? _prefetchingId;
+  Duration _resumePosition = Duration.zero;
+  Timer? _persistTimer;
+  bool _userPaused = false;
+  bool _restoredWasPlaying = false;
+  bool _recovering = false;
+  AudioSession? _audioSession;
 
   /// Number of open surfaces that have asked playback not to move on by itself
   /// (the lyrics panel and the 信息/歌词 editor). A counter rather than a flag
@@ -98,11 +108,101 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
           ? _playlist[_currentIndex]
           : null;
   bool get isPlaying => _isPlaying;
+  Duration get position => _player.position;
+  Future<void> persistPlaybackState() => _persistState();
   LoopMode get loopMode => _loopMode;
   bool get isShuffle => _isShuffle;
 
   BiliBeatAudioHandler() {
     _initAudioPlayerListeners();
+    unawaited(_configureAudioSession());
+  }
+
+  Future<void> _configureAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+      _audioSession = session;
+      session.interruptionEventStream.listen((event) async {
+        if (event.begin) {
+          _restoredWasPlaying = _player.playing;
+          if (_restoredWasPlaying) await _player.pause();
+        } else if (_restoredWasPlaying && !_userPaused) {
+          await session.setActive(true);
+          await _recoverPlayback();
+        }
+      });
+      session.becomingNoisyEventStream.listen((_) {
+        if (_player.playing) unawaited(pause());
+      });
+    } catch (e) {
+      debugPrint('Audio session setup failed: $e');
+    }
+  }
+
+  String? _statePath;
+  Future<String> _playbackStatePath() async {
+    return _statePath ??= '${(await getApplicationDocumentsDirectory()).path}/bilibeat_playback.json';
+  }
+
+  Future<void> restorePersistedQueue() async {
+    try {
+      final file = File(await _playbackStatePath());
+      if (!await file.exists()) return;
+      final map = Map<String, dynamic>.from(jsonDecode(await file.readAsString()));
+      List<Track> decode(String key) => (map[key] as List<dynamic>? ?? [])
+          .map((e) => Track.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      final natural = decode('naturalOrder');
+      final queue = decode('queue');
+      if (queue.isEmpty) return;
+      _naturalOrder..clear()..addAll(natural.isEmpty ? queue : natural);
+      _playlist..clear()..addAll(queue);
+      _isShuffle = map['shuffle'] == true;
+      final loop = map['loopMode'] as String?;
+      _loopMode = LoopMode.values.firstWhere((m) => m.name == loop, orElse: () => LoopMode.all);
+      _currentIndex = (map['currentIndex'] as num?)?.toInt() ?? 0;
+      if (_currentIndex < 0 || _currentIndex >= _playlist.length) _currentIndex = 0;
+      _resumePosition = Duration(milliseconds: (map['positionMs'] as num?)?.toInt() ?? 0);
+      _restoredWasPlaying = map['wasPlaying'] == true;
+      _emitQueue();
+      _currentTrackController.add(currentTrack);
+      _duration = Duration(seconds: currentTrack?.duration ?? 0);
+      if (currentTrack != null) _updateMediaItem(currentTrack!);
+      if (_restoredWasPlaying) await _startCurrent(autoplay: true, initialPosition: _resumePosition);
+    } catch (e) {
+      debugPrint('Playback queue restore failed: $e');
+    }
+  }
+
+  void _schedulePersist({bool immediate = false}) {
+    if (immediate) {
+      _persistTimer?.cancel();
+      unawaited(_persistState());
+      return;
+    }
+    if (_persistTimer != null) return;
+    _persistTimer = Timer(const Duration(seconds: 5), () {
+      _persistTimer = null;
+      unawaited(_persistState());
+    });
+  }
+
+  Future<void> _persistState() async {
+    try {
+      final map = {
+        'queue': _playlist.map((t) => t.toMap()).toList(),
+        'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
+        'currentIndex': _currentIndex,
+        'loopMode': _loopMode.name,
+        'shuffle': _isShuffle,
+        'positionMs': _player.position.inMilliseconds,
+        'wasPlaying': _player.playing && !_userPaused,
+      };
+      await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
+    } catch (e) {
+      debugPrint('Playback queue persist failed: $e');
+    }
   }
 
   void _emitQueue() {
@@ -155,7 +255,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     // playback state here: pushing a PlaybackState to audio_service on every
     // tick causes notification/MediaSession churn. The system UI interpolates
     // the notification position from the last state + speed.
-    _player.positionStream.listen(_positionController.add);
+    _player.positionStream.listen((position) {
+      _positionController.add(position);
+      if (_playlist.isNotEmpty) _schedulePersist();
+    });
 
     _player.durationStream.listen((dur) {
       if (dur != null && dur > Duration.zero) {
@@ -167,12 +270,18 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _player.playerStateStream.listen((state) {
       _isPlaying = state.playing;
+      if (state.playing) _userPaused = false;
       _playerStateController.add(_isPlaying);
       _broadcastState();
 
       if (state.processingState == ja.ProcessingState.completed) {
         _handleQueueCompleted();
       }
+    });
+
+    _player.errorStream.listen((error) {
+      debugPrint('Native audio error: $error');
+      if (!_userPaused && _playlist.isNotEmpty) unawaited(_recoverPlayback());
     });
 
     // Fires when the native player advances to the next queued file (gapless
@@ -265,6 +374,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   // ---------------------------------------------------------------------------
 
   Future<void> playTrack(Track track, {List<Track>? newQueue}) async {
+    _userPaused = false;
     if (newQueue != null && newQueue.isNotEmpty) {
       _naturalOrder
         ..clear()
@@ -274,6 +384,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         ..addAll(newQueue);
       if (_isShuffle) _applyShuffleOrder(pinned: track);
       _emitQueue();
+      _schedulePersist(immediate: true);
     }
     if (!_playlist.any((t) => t.id == track.id)) {
       _playlist.insert(0, track);
@@ -291,6 +402,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _emitQueue();
 
     await _startCurrent(autoplay: true);
+    _schedulePersist(immediate: true);
   }
 
   @override
@@ -303,6 +415,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     // Nothing loaded at all: playing would be a lie the UI then renders as
     // a paused-state toggle for silence. Stand down instead.
     if (_queueSource.length == 0) return;
+    _userPaused = false;
+    if (_audioSession != null) await _audioSession!.setActive(true);
     await _player.play();
     _isPlaying = true;
     _playerStateController.add(true);
@@ -311,10 +425,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> pause() async {
+    _userPaused = true;
     await _player.pause();
     _isPlaying = false;
     _playerStateController.add(false);
     _broadcastState();
+    _schedulePersist(immediate: true);
   }
 
   @override
@@ -324,6 +440,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _playerStateController.add(false);
     _broadcastState();
     await super.stop();
+    _schedulePersist(immediate: true);
   }
 
   @override
@@ -331,6 +448,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     await _player.seek(position);
     _positionController.add(position);
     _broadcastState();
+    _schedulePersist(immediate: true);
   }
 
   @override
@@ -403,13 +521,21 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _playerStateController.add(false);
       _emitQueue();
       _broadcastState();
+      _schedulePersist(immediate: true);
       return;
     }
 
     if (!wasCurrent) {
       if (index < _currentIndex) _currentIndex--;
+      // Removing a non-current item never requires replacing the active
+      // AudioPlayer source. The native queue is adjusted in place below.
+      final nativeIndex = index - _queueBaseIndex;
+      if (nativeIndex >= 0 && nativeIndex < _queueSource.length) {
+        await _queueSource.removeAt(nativeIndex);
+      }
       _emitQueue();
-      await _rebuildNativeQueueAtCurrent();
+      _schedulePersist(immediate: true);
+      unawaited(_prefetchNext());
       return;
     }
 
@@ -425,12 +551,14 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _playerStateController.add(false);
       _emitQueue();
       _broadcastState();
+      _schedulePersist(immediate: true);
       return;
     }
 
     _currentIndex = nextIndex;
     _emitQueue();
     await _startCurrent(autoplay: true);
+    _schedulePersist(immediate: true);
   }
 
   Future<void> reorderQueueItem(int oldIndex, int newIndex) async {
@@ -438,12 +566,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     final resolved = newIndex.clamp(0, _playlist.length - 1).toInt();
     if (oldIndex == resolved) return;
 
+    final activeId = currentTrack?.id;
     if (_isShuffle) {
       // The visible shuffled order stays intact. The dragged IDs define the
       // order to use when shuffle is later disabled.
       final displayed = List<Track>.of(_playlist);
       final moved = displayed.removeAt(oldIndex);
       displayed.insert(resolved, moved);
+      _playlist
+        ..clear()
+        ..addAll(displayed);
+      _currentIndex = _playlist.indexWhere((t) => t.id == activeId);
       final byId = {for (final track in _naturalOrder) track.id: track};
       _naturalOrder
         ..clear()
@@ -463,7 +596,38 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     }
 
     _emitQueue();
-    await _rebuildNativeQueueAtCurrent();
+    // Reorder only the children that are actually in the native window. The
+    // active child is never replaced, so playback remains gapless.
+    final nativeOld = oldIndex - _queueBaseIndex;
+    final nativeNew = resolved - _queueBaseIndex;
+    if (nativeOld >= 0 && nativeOld < _queueSource.length &&
+        nativeNew >= 0 && nativeNew < _queueSource.length) {
+      await _queueSource.move(nativeOld, nativeNew);
+    }
+    _schedulePersist(immediate: true);
+    unawaited(_trimQueueAfterCurrent());
+    unawaited(_prefetchNext());
+  }
+
+  Future<void> clearQueue() async {
+    ++_startToken;
+    _isRebuilding = true;
+    try {
+      await _player.stop();
+      await _queueSource.clear();
+    } finally {
+      _isRebuilding = false;
+    }
+    _playlist.clear();
+    _naturalOrder.clear();
+    _currentIndex = -1;
+    _isPlaying = false;
+    _userPaused = true;
+    _currentTrackController.add(null);
+    _playerStateController.add(false);
+    _emitQueue();
+    _broadcastState();
+    _schedulePersist(immediate: true);
   }
 
   Future<void> _rebuildNativeQueueAtCurrent() async {
@@ -552,6 +716,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       unawaited(_prefetchNext());
     }
     _broadcastState();
+    _schedulePersist(immediate: true);
   }
 
   Future<void> setShuffle(bool on) async {
@@ -582,6 +747,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     await _trimQueueAfterCurrent();
     _reconcileActiveTrack();
     unawaited(_prefetchNext());
+    _schedulePersist(immediate: true);
   }
 
   /// Reorders [_playlist] randomly, keeping [pinned] where it is so the
@@ -610,7 +776,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Download (if needed) the current track and load it as a single-item native
   /// queue, then optionally start playback and prefetch the following track.
-  Future<void> _startCurrent({required bool autoplay}) async {
+  Future<void> _startCurrent({required bool autoplay, Duration? initialPosition}) async {
     final active = currentTrack;
     if (active == null) return;
 
@@ -627,6 +793,9 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     final String path;
     try {
+      if (autoplay && _audioSession != null) {
+        await _audioSession!.setActive(true);
+      }
       path = await AudioDownloadService.ensureDownloaded(active);
     } catch (e) {
       debugPrint('playTrack download failed: $e');
@@ -660,7 +829,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       await _player.setAudioSource(
         _queueSource,
         initialIndex: 0,
-        initialPosition: Duration.zero,
+        initialPosition: initialPosition ?? Duration.zero,
       );
 
       if (autoplay && token == _startToken) {
@@ -683,6 +852,33 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (token != _startToken) return;
     _broadcastState();
     if (_loopMode != LoopMode.one) unawaited(_prefetchNext());
+  }
+
+  Future<void> _recoverPlayback() async {
+    if (_recovering || _userPaused || _playlist.isEmpty || _currentIndex < 0) return;
+    _recovering = true;
+    try {
+      if (_audioSession != null) await _audioSession!.setActive(true);
+      final position = _player.position;
+      final active = currentTrack;
+      if (active == null) return;
+      final path = await AudioDownloadService.ensureDownloaded(active);
+      await _queueSource.clear();
+      await _queueSource.add(ja.AudioSource.file(path, tag: active));
+      _queueBaseIndex = _currentIndex;
+      await _player.setAudioSource(_queueSource, initialIndex: 0, initialPosition: position);
+      await _player.play();
+      _isPlaying = true;
+      _playerStateController.add(true);
+      _broadcastState();
+    } catch (e) {
+      debugPrint('Playback recovery failed: $e');
+      _isPlaying = false;
+      _playerStateController.add(false);
+      _broadcastState();
+    } finally {
+      _recovering = false;
+    }
   }
 
   /// Background-download the next logical track and append it to the native

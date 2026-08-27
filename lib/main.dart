@@ -108,6 +108,7 @@ void main() async {
       androidNotificationOngoing: true,
     ),
   );
+  await _audioHandlerInstance!.restorePersistedQueue();
   // Android 13+ requires a runtime POST_NOTIFICATIONS grant for notifications
   // on stricter OEM builds. Fire-and-forget: stock Android exempts the media
   // session notification, so the answer is "no" on most devices and that is
@@ -149,7 +150,7 @@ class MainLayout extends StatefulWidget {
   State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _activeTabIndex = 0;
   late final BiliBeatAudioHandler _audioHandler = audioHandlerInstance;
 
@@ -183,6 +184,7 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     BiliAuthController.instance.addListener(_onAuthChanged);
     unawaited(BiliAuthController.instance.initialize());
     _initListeners();
@@ -191,6 +193,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     BiliAuthController.instance.removeListener(_onAuthChanged);
     for (final s in _subs) {
       s.cancel();
@@ -204,6 +207,14 @@ class _MainLayoutState extends State<MainLayout> {
     _pageFraction.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_audioHandler.persistPlaybackState());
+    }
   }
 
   void _onAuthChanged() {
@@ -220,12 +231,12 @@ class _MainLayoutState extends State<MainLayout> {
       final login = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.backgroundElevated,
-          title: const Text('需要登录', style: TextStyle(color: AppColors.textPrimary)),
-          content: const Text('请先登录 B 站账号，再导入收藏夹。', style: TextStyle(color: AppColors.textSecondary)),
+          backgroundColor: context.palette.backgroundElevated,
+          title: Text('需要登录', style: TextStyle(color: context.palette.textPrimary)),
+          content: Text('请先登录 B 站账号，再导入收藏夹。', style: TextStyle(color: context.palette.textSecondary)),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去登录', style: TextStyle(color: AppColors.accent))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('去登录', style: TextStyle(color: ctx.palette.accent))),
           ],
         ),
       );
@@ -262,8 +273,8 @@ class _MainLayoutState extends State<MainLayout> {
     final result = await showDialog<ImportDestination>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
-        title: const Text('选择导入目标', style: TextStyle(color: AppColors.textPrimary)),
+          backgroundColor: context.palette.backgroundElevated,
+          title: Text('选择导入目标', style: TextStyle(color: context.palette.textPrimary)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           RadioListTile<bool>(value: true, groupValue: createNew, onChanged: (v) => setDialogState(() => createNew = true), title: const Text('新建本地歌单')),
           if (createNew) TextField(controller: nameController, decoration: const InputDecoration(hintText: '歌单名称')),
@@ -271,7 +282,7 @@ class _MainLayoutState extends State<MainLayout> {
           if (!createNew && playlists.isNotEmpty) DropdownButton<String>(value: existingId ?? playlists.first.id, isExpanded: true, items: playlists.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))).toList(), onChanged: (v) => setDialogState(() => existingId = v)),
           if (!createNew && playlists.isEmpty) const Text('暂无可用本地歌单'),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), TextButton(onPressed: !createNew && playlists.isEmpty ? null : () => Navigator.pop(ctx, createNew ? ImportDestination.newPlaylist(nameController.text.trim()) : ImportDestination.existing(existingId!)), child: const Text('导入', style: TextStyle(color: AppColors.accent)))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), TextButton(onPressed: !createNew && playlists.isEmpty ? null : () => Navigator.pop(ctx, createNew ? ImportDestination.newPlaylist(nameController.text.trim()) : ImportDestination.existing(existingId!)), child: Text('导入', style: TextStyle(color: ctx.palette.accent)))],
       )),
     );
     nameController.dispose();
@@ -280,8 +291,8 @@ class _MainLayoutState extends State<MainLayout> {
 
   void _initListeners() {
     _subs.add(_audioHandler.currentTrackStream.listen((track) async {
+      _currentTrack.value = track;
       if (track != null) {
-        _currentTrack.value = track;
 
         // Fetch lyrics with stale cache validation.
         //
@@ -340,6 +351,16 @@ class _MainLayoutState extends State<MainLayout> {
     // The handler writes history itself when it auto-advances, so the rail has
     // to follow the store rather than the UI actions that happen to reach it.
     _subs.add(DatabaseService.historyUpdateStream.listen((_) => _loadHistory()));
+
+    // The handler restores its queue before Flutter builds the widget tree,
+    // so initialize the docked player from the already-restored snapshot too.
+    final restored = _audioHandler.currentTrack;
+    if (restored != null) {
+      _currentTrack.value = restored;
+      _isPlaying.value = _audioHandler.isPlaying;
+      _positionNotifier.value = _audioHandler.position;
+      _durationNotifier.value = Duration(seconds: restored.duration);
+    }
   }
 
   Future<void> _loadHistory() async {
@@ -514,12 +535,12 @@ class _MainLayoutState extends State<MainLayout> {
                           onPressed: _openLogin,
                           icon: BiliAuthController.instance.session?.face?.isNotEmpty == true
                               ? CircleAvatar(radius: 15, backgroundImage: NetworkImage(BiliAuthController.instance.session!.face!))
-                              : const Icon(Icons.account_circle_outlined, color: AppColors.textSecondary),
+                              : Icon(Icons.account_circle_outlined, color: context.palette.textSecondary),
                         ),
                         IconButton(
                           tooltip: '设置',
                           onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
-                          icon: const Icon(Icons.settings_outlined, color: AppColors.textSecondary),
+                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
                         ),
                         Padding(
                           padding: const EdgeInsets.only(left: 4, right: 6),
@@ -594,7 +615,7 @@ class _MainLayoutState extends State<MainLayout> {
                         child: GestureDetector(
                           onTap: () =>
                               setState(() => _activePlaylistSheet = null),
-                          child: const ColoredBox(color: AppColors.black45),
+                          child: ColoredBox(color: Colors.black.withValues(alpha: .28)),
                         ),
                       ),
                       Align(
