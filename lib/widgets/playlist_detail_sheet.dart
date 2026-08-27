@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:hugeicons/hugeicons.dart';
 import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
 import '../models/playlist.dart';
@@ -24,6 +25,7 @@ class PlaylistDetailSheet extends StatefulWidget {
   final Playlist playlist;
   final TrackAction onSelectTrack;
   final TrackAction? onPlayOnly;
+  final Future<void> Function(Track track)? onPlayNext;
   final void Function(List<Track> tracks, {bool shuffle})? onPlayCollection;
   final VoidCallback? onPlaylistUpdated;
   final VoidCallback? onClose;
@@ -34,6 +36,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     required this.playlist,
     required this.onSelectTrack,
     this.onPlayOnly,
+    this.onPlayNext,
     this.onPlayCollection,
     this.onPlaylistUpdated,
     this.onClose,
@@ -45,6 +48,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     required Playlist playlist,
     required TrackAction onSelectTrack,
     TrackAction? onPlayOnly,
+    Future<void> Function(Track track)? onPlayNext,
     void Function(List<Track> tracks, {bool shuffle})? onPlayCollection,
     VoidCallback? onPlaylistUpdated,
     VoidCallback? onClose,
@@ -59,6 +63,7 @@ class PlaylistDetailSheet extends StatefulWidget {
         playlist: playlist,
         onSelectTrack: onSelectTrack,
         onPlayOnly: onPlayOnly,
+        onPlayNext: onPlayNext,
         onPlayCollection: onPlayCollection,
         onPlaylistUpdated: onPlaylistUpdated,
         onClose: onClose ?? () => Navigator.pop(context),
@@ -168,8 +173,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
             ? EdgeInsets.zero
             : EdgeInsets.only(bottom: dockedPlayerHeight),
         height: MediaQuery.of(context).size.height * 0.76,
-        decoration: const BoxDecoration(
-          color: AppColors.surfaceDeep,
+        decoration: BoxDecoration(
+          color: context.palette.surfaceDeep,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           boxShadow: [
             BoxShadow(
@@ -210,8 +215,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     )
                   else
                     IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                          color: AppColors.textSecondary, size: 28),
+                      icon: Icon(Icons.keyboard_arrow_down_rounded,
+                          color: context.palette.textSecondary, size: 28),
                       tooltip: '收起',
                       onPressed:
                           widget.onClose ?? () => Navigator.pop(context),
@@ -222,18 +227,18 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                         width: 36,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: AppColors.textFaint,
+                          color: context.palette.textFaint,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
                   ),
                   IconButton(
-                    icon: Icon(
-                      _isEditMode ? Icons.done_rounded : Icons.edit_outlined,
+                    icon: HugeIcon(
+                      icon: _isEditMode ? HugeIcons.strokeRoundedTick01 : HugeIcons.strokeRoundedEdit02,
                       color: _isEditMode
                           ? context.palette.accent
-                          : AppColors.textSecondary,
+                          : context.palette.textSecondary,
                       size: 22,
                     ),
                     tooltip: _isEditMode ? '完成' : '编辑',
@@ -268,8 +273,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                             _currentPlaylist.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
+                            style: TextStyle(
+                              color: context.palette.textPrimary,
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                             ),
@@ -279,8 +284,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                             '${_currentPlaylist.tracks.length} 首',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: AppColors.textMuted, fontSize: 13),
+                            style: TextStyle(
+                                color: context.palette.textMuted, fontSize: 13),
                           ),
                         ],
                       ),
@@ -288,16 +293,16 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                   ),
                   if (!_isVirtualDownloads && !_isFavorites && !_isEditMode) ...[
                     IconButton(
-                      icon: const Icon(Icons.image_outlined,
-                          color: AppColors.textSecondary, size: 22),
+                      icon: HugeIcon(icon: HugeIcons.strokeRoundedImage02,
+                          color: context.palette.textSecondary, size: 22),
                       tooltip: '更换封面',
                       onPressed: _pickCover,
                     ),
                     IconButton(
-                      icon: Icon(_currentPlaylist.isOnline
-                          ? Icons.cloud_sync_outlined
-                          : Icons.add_rounded,
-                          color: AppColors.textSecondary, size: 24),
+                      icon: HugeIcon(icon: _currentPlaylist.isOnline
+                          ? HugeIcons.strokeRoundedArrowReloadHorizontal
+                          : HugeIcons.strokeRoundedAdd01,
+                          color: context.palette.textSecondary, size: 24),
                       tooltip: _currentPlaylist.isOnline ? '同步在线歌单' : '添加本地曲目',
                       onPressed: _currentPlaylist.isOnline
                           ? () => widget.onSyncOnline?.call(_currentPlaylist)
@@ -321,15 +326,15 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                       : () {
                           Haptics.medium();
                           widget.onPlayCollection?.call(_playableQueue,
-                              shuffle: true);
+                              shuffle: false);
                         },
-                  icon: const Icon(Icons.shuffle_rounded, size: 22),
-                  label: const Text('随机播放',
+                icon: const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02, size: 22),
+                  label: const Text('播放全部',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: context.palette.accent,
-                    foregroundColor: AppColors.textPrimary,
+                    foregroundColor: context.palette.textPrimary,
                     minimumSize: const Size.fromHeight(44),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
@@ -389,22 +394,22 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 20, vertical: 12),
-                decoration: const BoxDecoration(
-                  color: AppColors.backgroundElevated,
-                  border: Border(top: BorderSide(color: AppColors.hairline)),
+        decoration: BoxDecoration(
+          color: context.palette.backgroundElevated,
+                  border: Border(top: BorderSide(color: context.palette.hairline)),
                 ),
                 child: Row(
                   children: [
                     Expanded(
                       child: TextButton.icon(
-                        icon: const Icon(Icons.playlist_add_rounded,
-                            color: AppColors.textPrimary),
+                        icon: Icon(Icons.playlist_add_rounded,
+                            color: context.palette.textPrimary),
                         label: Text(
                           '加入歌单 (${_selectedTrackIds.length})',
                           style: TextStyle(
                             color: _selectedTrackIds.isEmpty
-                                ? AppColors.textFaint
-                                : AppColors.textPrimary,
+                                ? context.palette.textFaint
+                                : context.palette.textPrimary,
                           ),
                         ),
                         onPressed: _selectedTrackIds.isEmpty
@@ -438,7 +443,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                           '删除 (${_selectedTrackIds.length})',
                           style: TextStyle(
                             color: _selectedTrackIds.isEmpty
-                                ? AppColors.textFaint
+                                ? context.palette.textFaint
                                 : AppColors.danger,
                           ),
                         ),
@@ -490,7 +495,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     : Icons.radio_button_unchecked_rounded,
                 color: isSelected
                     ? context.palette.accent
-                    : AppColors.textFaint,
+                    : context.palette.textFaint,
                 size: 22,
               ),
               const SizedBox(width: 12),
@@ -513,8 +518,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     child: MarqueeText(
                       text: track.title,
                       phase: (index % 5) / 5,
-                      style: const TextStyle(
-                          color: AppColors.textPrimary,
+                      style: TextStyle(
+                          color: context.palette.textPrimary,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                           height: 1.3),
@@ -522,8 +527,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                   ),
                   Text(
                     track.uploader,
-                    style: const TextStyle(
-                        color: AppColors.textMuted,
+                    style: TextStyle(
+                        color: context.palette.textMuted,
                         fontSize: 12),
                   ),
                 ],
@@ -534,19 +539,14 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
               TrackDownloadButton(
                 track: track,
                 size: 24,
+                isPlayNext: true,
                 onPlay: () {
-                  if (widget.onPlayOnly != null) {
-                    widget.onPlayOnly!(track,
-                        queue: _playableQueue);
-                  } else {
-                    widget.onSelectTrack(track,
-                        queue: _playableQueue);
-                  }
+                  widget.onPlayNext?.call(track);
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.add,
-                    color: AppColors.textSecondary,
+              icon: HugeIcon(icon: HugeIcons.strokeRoundedFolderAdd,
+                    color: context.palette.textSecondary,
                     size: 22),
                 tooltip: '添加至歌单',
                 padding: EdgeInsets.zero,
@@ -572,10 +572,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         color: AppColors.danger.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Icon(
-        _isVirtualDownloads
-            ? Icons.delete_outline_rounded
-            : Icons.playlist_remove_rounded,
+      child: HugeIcon(
+        icon: HugeIcons.strokeRoundedDelete02,
         color: AppColors.danger,
       ),
     );
@@ -592,13 +590,16 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
     final List<Color> gradient;
     final IconData icon;
     if (_isVirtualDownloads) {
-      gradient = [AppColors.success, const Color(0xFF1B8A4B)];
+      gradient = [context.palette.accent, context.palette.accent.withValues(alpha: 0.72)];
       icon = Icons.download_rounded;
     } else if (isFav) {
       gradient = [context.palette.accent, context.palette.accent.withValues(alpha: 0.72)];
       icon = Icons.favorite;
     } else {
-      gradient = [AppColors.surfaceNeutral, AppColors.surfaceNeutralDeep];
+      gradient = [
+        context.palette.surfaceDeep,
+        context.palette.backgroundElevated,
+      ];
       icon = Icons.queue_music;
     }
     return SizedBox(
@@ -609,11 +610,12 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         child: cover != null && cover.isNotEmpty && !_isVirtualDownloads
             ? CachedCoverImage(url: cover, width: 72, height: 72)
             : DecoratedBox(
+                key: const Key('playlistDefaultArtwork'),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(colors: gradient),
                 ),
                 child: Center(
-                  child: Icon(icon, color: AppColors.textPrimary, size: 36),
+                  child: Icon(icon, color: context.palette.textPrimary, size: 36),
                 ),
               ),
       ),
@@ -650,7 +652,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
       showAppSnackBar(
         ScaffoldMessenger.of(context),
         message: '暂无本地已下载曲目，去搜索下载音乐吧',
-        backgroundColor: AppColors.backgroundElevated,
+        backgroundColor: context.palette.backgroundElevated,
       );
       return;
     }
@@ -671,14 +673,14 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
+        backgroundColor: context.palette.backgroundElevated,
         title: Text(_isVirtualDownloads ? '删除本地音频' : '从歌单移除',
-            style: const TextStyle(color: AppColors.textPrimary)),
+            style: TextStyle(color: context.palette.textPrimary)),
         content: Text(
           _isVirtualDownloads
               ? '确定要彻底删除选中的 $count 首本地音频吗？（本地文件将被删除）'
               : '确定要将选中的 $count 首曲目从「${_currentPlaylist.name}」中移除吗？',
-          style: const TextStyle(color: AppColors.textSecondary),
+          style: TextStyle(color: context.palette.textSecondary),
         ),
         actions: [
           TextButton(
@@ -725,15 +727,15 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
     final newName = await showDialog<String>(
       context: context,
       builder: (dCtx) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
-        title: const Text('重命名歌单', style: TextStyle(color: AppColors.textPrimary)),
+        backgroundColor: context.palette.backgroundElevated,
+        title: Text('重命名歌单', style: TextStyle(color: context.palette.textPrimary)),
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
+          style: TextStyle(color: context.palette.textPrimary),
+          decoration: InputDecoration(
             hintText: '歌单名称',
-            hintStyle: TextStyle(color: AppColors.textFaint),
+            hintStyle: TextStyle(color: context.palette.textFaint),
           ),
         ),
         actions: [
@@ -781,11 +783,11 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
-        title: const Text('删除本地音频',
-            style: TextStyle(color: AppColors.textPrimary)),
-        content: const Text('将删除本地音频，可重新下载。',
-            style: TextStyle(color: AppColors.textSecondary)),
+        backgroundColor: context.palette.backgroundElevated,
+        title: Text('删除本地音频',
+            style: TextStyle(color: context.palette.textPrimary)),
+        content: Text('将删除本地音频，可重新下载。',
+            style: TextStyle(color: context.palette.textSecondary)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),

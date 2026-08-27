@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -382,11 +381,10 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   /// the track that starts.
   void _playCollection(List<Track> tracks, {bool shuffle = false}) async {
     if (tracks.isEmpty) return;
-    await _audioHandler.setShuffle(shuffle);
+    await _audioHandler.setShuffle(false);
     await _audioHandler.setLoopMode(LoopMode.all);
     if (!mounted) return;
-    final first =
-        shuffle ? tracks[Random().nextInt(tracks.length)] : tracks.first;
+    final first = tracks.first;
     _currentTrack.value = first;
     _audioHandler.playTrack(first, newQueue: tracks);
   }
@@ -620,6 +618,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           playlist: _activePlaylistSheet!,
                           onSelectTrack: _onPlayTrackAndExpand,
                           onPlayOnly: _onPlayTrackOnly,
+                          onPlayNext: _audioHandler.playNext,
                           onPlayCollection: _playCollection,
                           onSyncOnline: _syncOnlinePlaylist,
                           onPlaylistUpdated: _loadHistory,
