@@ -173,7 +173,7 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
     return Stack(
       children: [
         // Pure black everywhere. The glow is the exception, not the default.
-        const Positioned.fill(child: ColoredBox(color: AppColors.background)),
+        Positioned.fill(child: ColoredBox(color: context.palette.background)),
 
         // One aura, hanging off the top edge, gone by the time the first row
         // of content starts. It used to be two blobs across the whole screen,
@@ -217,14 +217,14 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
           left: 0,
           right: 0,
           height: size.height * 0.62,
-          child: const IgnorePointer(
+          child: IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, AppColors.background],
-                  stops: [0.5, 0.98],
+                  colors: [Colors.transparent, context.palette.background],
+                  stops: const [0.5, 0.98],
                 ),
               ),
             ),

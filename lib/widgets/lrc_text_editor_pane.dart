@@ -73,7 +73,7 @@ class LrcTextEditorPane extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: onSave,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accent,
+                  backgroundColor: context.palette.accent,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),

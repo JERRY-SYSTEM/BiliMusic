@@ -93,9 +93,9 @@ class _SegmentTabsState extends State<SegmentTabs> {
               bottom: 0,
               child: Container(
                 decoration: BoxDecoration(
-                  color: AppColors.accent14,
+                  color: context.palette.accent14,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
-                  border: Border.all(color: AppColors.accent30),
+                  border: Border.all(color: context.palette.accent30),
                 ),
               ),
             );
@@ -127,7 +127,7 @@ class _SegmentTabsState extends State<SegmentTabs> {
         child: Text(
           widget.labels[index],
           style: TextStyle(
-            color: active ? AppColors.textPrimary : AppColors.textMuted,
+            color: active ? context.palette.textPrimary : context.palette.textMuted,
             fontSize: widget.fontSize,
             fontWeight: FontWeight.w700,
             letterSpacing: -0.3,

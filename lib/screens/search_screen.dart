@@ -351,14 +351,14 @@ class _SearchScreenState extends State<SearchScreen> {
     final hasContent =
         _hasSearched ? _searchResults.isNotEmpty : _recommendedTracks.isNotEmpty;
     if (_isLoadingMore) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 22),
         child: Center(
           child: SizedBox(
             width: 22,
             height: 22,
             child: CircularProgressIndicator(
-                strokeWidth: 2.5, color: AppColors.accent),
+                strokeWidth: 2.5, color: context.palette.accent),
           ),
         ),
       );
@@ -550,8 +550,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('重试'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.accent,
-                    side: const BorderSide(color: AppColors.accent30),
+                    foregroundColor: context.palette.accent,
+                    side: BorderSide(color: context.palette.accent30),
                   ),
                 ),
               ],
@@ -566,9 +566,9 @@ class _SearchScreenState extends State<SearchScreen> {
             subtitle: '搜过之后，这里会根据你的收藏与播放推荐',
           ),
         ] else ...[
-          const Row(
+          Row(
             children: [
-              Icon(Icons.auto_awesome, color: AppColors.accent, size: 20),
+              Icon(Icons.auto_awesome, color: context.palette.accent, size: 20),
               SizedBox(width: 8),
               Text(
                 '推荐',

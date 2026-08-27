@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 /// Single source of truth for color. The brand accent stays the signature
 /// bilibeat pink; everything else is a calm, cool neutral ramp so the accent
@@ -58,6 +57,80 @@ class AppColors {
   static const Color danger = Color(0xFFFF453A);
 }
 
+/// Runtime palette used by widgets.  Unlike the legacy constants above this
+/// palette follows both the selected brightness and the user's accent color.
+class AppPalette extends ThemeExtension<AppPalette> {
+  const AppPalette({
+    required this.accent,
+    required this.accentSoft,
+    required this.background,
+    required this.backgroundElevated,
+    required this.surfaceDeep,
+    required this.surfaceCard,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textMuted,
+    required this.textFaint,
+    required this.hairline,
+    required this.danger,
+    required this.success,
+  });
+
+  final Color accent, accentSoft, background, backgroundElevated, surfaceDeep;
+  final Color surfaceCard, textPrimary, textSecondary, textMuted, textFaint;
+  final Color hairline, danger, success;
+
+  LinearGradient get primaryGradient => LinearGradient(colors: [accentSoft, accent]);
+  Color get accent14 => accent.withValues(alpha: 0.14);
+  Color get accent30 => accent.withValues(alpha: 0.30);
+  Color get accent50 => accent.withValues(alpha: 0.50);
+  Color get accent12 => accent.withValues(alpha: 0.12);
+  Color get accent04 => accent.withValues(alpha: 0.04);
+
+  factory AppPalette.from(ThemeMode mode, Color accent) {
+    final dark = mode != ThemeMode.light;
+    return AppPalette(
+      accent: accent,
+      accentSoft: accent.withValues(alpha: dark ? .14 : .12),
+      background: dark ? AppColors.background : const Color(0xFFF7F7F9),
+      backgroundElevated: dark ? AppColors.backgroundElevated : Colors.white,
+      surfaceDeep: dark ? AppColors.surfaceDeep : const Color(0xFFEDEDF2),
+      surfaceCard: dark ? AppColors.surfaceCard : const Color(0x12000000),
+      textPrimary: dark ? AppColors.textPrimary : const Color(0xFF15151A),
+      textSecondary: dark ? AppColors.textSecondary : const Color(0xB315151A),
+      textMuted: dark ? AppColors.textMuted : const Color(0x9915151A),
+      textFaint: dark ? AppColors.textFaint : const Color(0x5915151A),
+      hairline: dark ? AppColors.hairline : const Color(0x1F000000),
+      danger: AppColors.danger,
+      success: AppColors.success,
+    );
+  }
+
+  @override
+  AppPalette copyWith({Color? accent, Color? background}) => AppPalette(
+        accent: accent ?? this.accent,
+        accentSoft: accentSoft,
+        background: background ?? this.background,
+        backgroundElevated: backgroundElevated,
+        surfaceDeep: surfaceDeep,
+        surfaceCard: surfaceCard,
+        textPrimary: textPrimary,
+        textSecondary: textSecondary,
+        textMuted: textMuted,
+        textFaint: textFaint,
+        hairline: hairline,
+        danger: danger,
+        success: success,
+      );
+
+  @override
+  AppPalette lerp(ThemeExtension<AppPalette>? other, double t) => this;
+}
+
+extension AppPaletteContext on BuildContext {
+  AppPalette get palette => Theme.of(this).extension<AppPalette>()!;
+}
+
 /// Corner-radius scale.
 class AppRadius {
   static const double sm = 10;
@@ -76,54 +149,46 @@ class AppTypography {
     height: 1.1,
     fontWeight: FontWeight.w800,
     letterSpacing: -1.0,
-    color: AppColors.textPrimary,
   );
   static const TextStyle titleLarge = TextStyle(
     fontSize: 24,
     height: 1.15,
     fontWeight: FontWeight.w700,
     letterSpacing: -0.6,
-    color: AppColors.textPrimary,
   );
   static const TextStyle title = TextStyle(
     fontSize: 20,
     height: 1.2,
     fontWeight: FontWeight.w700,
     letterSpacing: -0.4,
-    color: AppColors.textPrimary,
   );
   static const TextStyle headline = TextStyle(
     fontSize: 17,
     height: 1.25,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.2,
-    color: AppColors.textPrimary,
   );
   static const TextStyle body = TextStyle(
     fontSize: 15,
     height: 1.4,
     fontWeight: FontWeight.w400,
-    color: AppColors.textPrimary,
   );
   static const TextStyle bodyMedium = TextStyle(
     fontSize: 14,
     height: 1.35,
     fontWeight: FontWeight.w500,
-    color: AppColors.textSecondary,
   );
   static const TextStyle caption = TextStyle(
     fontSize: 12,
     height: 1.3,
     fontWeight: FontWeight.w500,
     letterSpacing: 0.1,
-    color: AppColors.textMuted,
   );
   static const TextStyle overline = TextStyle(
     fontSize: 11,
     height: 1.2,
     fontWeight: FontWeight.w700,
     letterSpacing: 1.4,
-    color: AppColors.textMuted,
   );
 }
 
@@ -138,6 +203,7 @@ class AppTheme {
       splashFactory: InkSparkle.splashFactory,
     );
     return base.copyWith(
+      extensions: [AppPalette.from(mode, accent)],
       textTheme: base.textTheme.copyWith(
         displayLarge: AppTypography.display, displayMedium: AppTypography.titleLarge,
         titleLarge: AppTypography.title, titleMedium: AppTypography.headline,
@@ -148,52 +214,6 @@ class AppTheme {
     );
   }
   static ThemeData get darkTheme {
-    final base = ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: AppColors.background,
-      useMaterial3: true,
-      colorScheme: const ColorScheme.dark(
-        primary: AppColors.accent,
-        secondary: AppColors.accent,
-        surface: AppColors.backgroundElevated,
-        onPrimary: Colors.white,
-      ),
-      splashFactory: InkSparkle.splashFactory,
-    );
-
-    return base.copyWith(
-      textTheme: base.textTheme.copyWith(
-        displayLarge: AppTypography.display,
-        displayMedium: AppTypography.titleLarge,
-        titleLarge: AppTypography.title,
-        titleMedium: AppTypography.headline,
-        bodyLarge: AppTypography.body,
-        bodyMedium: AppTypography.bodyMedium,
-        bodySmall: AppTypography.caption,
-        labelSmall: AppTypography.overline,
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: false,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
-        titleTextStyle: AppTypography.titleLarge,
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Colors.transparent,
-        selectedItemColor: AppColors.accent,
-        unselectedItemColor: AppColors.textMuted,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-      ),
-      iconTheme: const IconThemeData(color: AppColors.textSecondary),
-      sliderTheme: const SliderThemeData(
-        activeTrackColor: AppColors.accent,
-        inactiveTrackColor: AppColors.hairlineStrong,
-        thumbColor: AppColors.accent,
-        overlayColor: AppColors.accent22,
-      ),
-    );
+    return build(ThemeMode.dark, AppColors.accent);
   }
 }

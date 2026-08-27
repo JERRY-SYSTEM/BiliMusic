@@ -204,8 +204,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                                 _currentPlaylist.tracks.length
                             ? '取消全选'
                             : '全选',
-                        style: const TextStyle(
-                            color: AppColors.accent, fontSize: 14),
+                        style: TextStyle(
+                            color: context.palette.accent, fontSize: 14),
                       ),
                     )
                   else
@@ -232,7 +232,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     icon: Icon(
                       _isEditMode ? Icons.done_rounded : Icons.edit_outlined,
                       color: _isEditMode
-                          ? AppColors.accent
+                          ? context.palette.accent
                           : AppColors.textSecondary,
                       size: 22,
                     ),
@@ -328,7 +328,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accent,
+                    backgroundColor: context.palette.accent,
                     foregroundColor: AppColors.textPrimary,
                     minimumSize: const Size.fromHeight(44),
                     shape: RoundedRectangleBorder(
@@ -489,7 +489,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     ? Icons.check_circle_rounded
                     : Icons.radio_button_unchecked_rounded,
                 color: isSelected
-                    ? AppColors.accent
+                    ? context.palette.accent
                     : AppColors.textFaint,
                 size: 22,
               ),
@@ -595,7 +595,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
       gradient = [AppColors.success, const Color(0xFF1B8A4B)];
       icon = Icons.download_rounded;
     } else if (isFav) {
-      gradient = [AppColors.accent, const Color(0xFFFF5252)];
+      gradient = [context.palette.accent, context.palette.accent.withValues(alpha: 0.72)];
       icon = Icons.favorite;
     } else {
       gradient = [AppColors.surfaceNeutral, AppColors.surfaceNeutralDeep];
@@ -742,7 +742,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
             onPressed: () => Navigator.pop(dCtx),
           ),
           TextButton(
-            child: const Text('保存', style: TextStyle(color: AppColors.accent)),
+            child: Text('保存', style: TextStyle(color: context.palette.accent)),
             onPressed: () => Navigator.pop(dCtx, controller.text),
           ),
         ],

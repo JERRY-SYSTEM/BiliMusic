@@ -347,7 +347,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                   fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
                   letterSpacing: isActive ? -0.4 : -0.2,
                   shadows: isActive
-                      ? const [Shadow(color: AppColors.accent50, blurRadius: 18)]
+                      ? [Shadow(color: context.palette.accent50, blurRadius: 18)]
                       : null,
                 ),
                 child: Text(line.text),
@@ -358,7 +358,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                   duration: AppMotion.slow,
                   curve: AppMotion.standard,
                   style: TextStyle(
-                    color: isActive ? AppColors.accent : AppColors.textMuted,
+                    color: isActive ? context.palette.accent : context.palette.textMuted,
                     fontSize: isActive ? 16 : 14,
                     height: 1.35,
                     fontWeight: FontWeight.w500,
@@ -379,15 +379,15 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       decoration: BoxDecoration(
         color: AppColors.backgroundElevated,
         borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: AppColors.accent30),
+        border: Border.all(color: context.palette.accent30),
         boxShadow: const [
           BoxShadow(color: AppColors.black45, blurRadius: 16, offset: Offset(0, 4)),
         ],
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.touch_app_rounded, color: AppColors.accent, size: 15),
+          Icon(Icons.touch_app_rounded, color: context.palette.accent, size: 15),
           SizedBox(width: 7),
           Text(
             '点击正在唱的那行歌词',
@@ -413,15 +413,15 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         decoration: BoxDecoration(
           color: AppColors.backgroundElevated,
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          border: Border.all(color: AppColors.accent30),
+          border: Border.all(color: context.palette.accent30),
           boxShadow: const [
             BoxShadow(color: AppColors.black45, blurRadius: 16, offset: Offset(0, 4)),
           ],
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.my_location_rounded, color: AppColors.accent, size: 15),
+            Icon(Icons.my_location_rounded, color: context.palette.accent, size: 15),
             SizedBox(width: 6),
             Text('回到当前',
                 style: TextStyle(
@@ -457,8 +457,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
               icon: const Icon(Icons.search, size: 16),
               label: const Text('搜索或粘贴歌词'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.accent,
-                side: const BorderSide(color: AppColors.accent30),
+                foregroundColor: context.palette.accent,
+                side: BorderSide(color: context.palette.accent30),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadius.pill)),
                 padding:

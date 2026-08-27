@@ -35,7 +35,7 @@ class ProgressRing extends StatelessWidget {
               value: fraction.clamp(0.0, 1.0),
               strokeWidth: strokeWidth,
               backgroundColor: trackColor,
-              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.accent),
+              valueColor: AlwaysStoppedAnimation<Color>(context.palette.accent),
             ),
           ),
           if (child != null) child!,

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 import '../models/track.dart';
 import '../models/playlist.dart';
 import '../services/database_service.dart';
@@ -43,6 +44,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  AppPalette get _palette => Theme.of(context).extension<AppPalette>()!;
   List<Playlist> _playlists = [];
   List<Track> _downloadedTracks = [];
   StreamSubscription<void>? _downloadSub;
@@ -98,14 +100,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
-        title: const Text('新建歌单', style: TextStyle(color: AppColors.textPrimary)),
+        backgroundColor: _palette.backgroundElevated,
+        title: Text('新建歌单', style: TextStyle(color: _palette.textPrimary)),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
+          style: TextStyle(color: _palette.textPrimary),
+          decoration: InputDecoration(
             hintText: '歌单名称',
-            hintStyle: TextStyle(color: AppColors.textFaint),
+            hintStyle: TextStyle(color: _palette.textFaint),
           ),
         ),
         actions: [
@@ -114,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => Navigator.pop(ctx),
           ),
           TextButton(
-            child: const Text('创建', style: TextStyle(color: AppColors.accent)),
+            child: Text('创建', style: TextStyle(color: _palette.accent)),
             onPressed: () => Navigator.pop(ctx, controller.text),
           ),
         ],
@@ -137,12 +139,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundElevated,
-        title: const Text('删除歌单',
-            style: TextStyle(color: AppColors.textPrimary)),
+        backgroundColor: _palette.backgroundElevated,
+        title: Text('删除歌单',
+            style: TextStyle(color: _palette.textPrimary)),
         content: Text(
           '「${pl.name}」将被删除，本地音频保留。',
-          style: const TextStyle(color: AppColors.textSecondary),
+          style: TextStyle(color: _palette.textSecondary),
         ),
         actions: [
           TextButton(
@@ -151,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除', style: TextStyle(color: AppColors.danger)),
+            child: Text('删除', style: TextStyle(color: _palette.danger)),
           ),
         ],
       ),
@@ -196,6 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required List<Track> Function() tracks,
     String? cover,
   }) {
+    final palette = _palette;
     return GestureDetector(
       onTap: onTap,
       child: GlassCard(
@@ -218,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             gradient: LinearGradient(colors: gradient),
                           ),
                           child:
-                              Icon(icon, color: AppColors.textPrimary, size: 22),
+                              Icon(icon, color: palette.textPrimary, size: 22),
                         ),
                 ),
                 const Spacer(),
@@ -243,6 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Start-this-collection control. Loop-all, in order — the shuffled variant
   /// lives inside the collection, where 随机播放 is the header button.
   Widget _playCollectionButton(List<Track> Function() tracks) {
+    final palette = _palette;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -258,18 +262,18 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Container(
             width: 30,
             height: 30,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: AppColors.primaryGradient,
+              gradient: LinearGradient(colors: [palette.accent.withValues(alpha: .72), palette.accent]),
               boxShadow: [
                 BoxShadow(
-                    color: AppColors.accent30,
+                    color: palette.accent.withValues(alpha: .30),
                     blurRadius: 10,
                     offset: Offset(0, 3)),
               ],
             ),
-            child: const Icon(Icons.play_arrow_rounded,
-                color: AppColors.textPrimary, size: 20),
+            child: Icon(Icons.play_arrow_rounded,
+                color: palette.textPrimary, size: 20),
           ),
         ),
       ),
@@ -282,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// and there is no reason a playlist should look heavier than the songs
   /// inside it.
   Widget _playlistBar(Playlist pl) {
+    final palette = _palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: TrackRow.gap),
       child: TrackRow(
@@ -296,13 +301,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   : Container(
                       width: 54,
                       height: 54,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [AppColors.surfaceNeutral, AppColors.surfaceNeutralDeep],
+                          colors: [palette.surfaceDeep, palette.backgroundElevated],
                         ),
                       ),
-                      child: const Icon(Icons.queue_music_rounded,
-                          color: AppColors.textPrimary, size: 26),
+                      child: Icon(Icons.queue_music_rounded,
+                          color: palette.textPrimary, size: 26),
                     ),
             ),
             const SizedBox(width: 12),
@@ -314,16 +319,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     pl.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: AppColors.textPrimary,
+                    style: TextStyle(
+                        color: _palette.textPrimary,
                         fontSize: 15,
                         height: 1.3,
                         fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
                   Text('${pl.tracks.length} 首',
-                      style: const TextStyle(
-                          color: AppColors.textMuted, fontSize: 13)),
+                      style: TextStyle(
+                          color: _palette.textMuted, fontSize: 13)),
                 ],
               ),
             ),
@@ -362,8 +367,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: MarqueeText(
                       text: task.track.title,
                       phase: (index % 5) / 5,
-                      style: const TextStyle(
-                          color: AppColors.textPrimary,
+                      style: TextStyle(
+                          color: _palette.textPrimary,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                           height: 1.3),
@@ -374,8 +379,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     task.track.uploader,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 12),
+                    style: TextStyle(
+                        color: _palette.textMuted, fontSize: 12),
                   ),
                 ],
               ),
@@ -397,15 +402,15 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 54,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadius.sm),
-              border: Border.all(color: AppColors.hairlineStrong),
+              border: Border.all(color: _palette.hairline),
             ),
-            child: const Icon(Icons.add_rounded,
-                color: AppColors.accent, size: 24),
+            child: Icon(Icons.add_rounded,
+                color: _palette.accent, size: 24),
           ),
           const SizedBox(width: 12),
-          const Text('新建歌单',
+          Text('新建歌单',
               style: TextStyle(
-                  color: AppColors.textSecondary,
+                  color: _palette.textSecondary,
                   fontSize: 15,
                   fontWeight: FontWeight.w600)),
         ],
@@ -435,15 +440,15 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.only(left: 20, right: 20, top: 20),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              // No "聆听" heading: the tab bar above already names the page, and
+              // No "主页" heading: the tab bar above already names the page, and
               // repeating it one line below was the same word twice.
               // Quick Access Cards: Downloaded Tracks & Favorites
         Row(
           children: [
             Expanded(
               child: _quickCard(
-                icon: Icons.download_done_rounded,
-                gradient: const [AppColors.success, Color(0xFF059669)],
+                icon: Icons.download_rounded,
+                gradient: [_palette.accent.withValues(alpha: .72), _palette.accent],
                 title: '本地',
                 subtitle: _downloadingTasks.isEmpty
                     ? '${_downloadedTracks.length} 首'
@@ -456,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: _quickCard(
                 icon: Icons.favorite_rounded,
-                gradient: const [AppColors.pinkStart, AppColors.accent],
+                gradient: [_palette.accent.withValues(alpha: .72), _palette.accent],
                 title: '收藏',
                 subtitle: '${_favorites?.tracks.length ?? 0} 首',
                 onTap: () {
@@ -481,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // Playlists Section Header
               Row(children: [
                 const Expanded(child: Text('在线歌单', style: AppTypography.title)),
-                IconButton(onPressed: widget.onImportOnlinePlaylist, icon: const Icon(Icons.cloud_download_outlined), tooltip: '导入在线歌单'),
+                IconButton(onPressed: widget.onImportOnlinePlaylist, icon: const HugeIcon(icon: HugeIcons.strokeRoundedFolderInput), tooltip: '导入在线歌单'),
               ]),
 
               const SizedBox(height: 12),
@@ -574,13 +579,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                   track.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                                  style: TextStyle(color: _palette.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
                                 ),
                                 Text(
                                   track.uploader,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                                  style: TextStyle(color: _palette.textMuted, fontSize: 12),
                                 ),
                               ],
                             ),

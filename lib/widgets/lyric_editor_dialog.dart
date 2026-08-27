@@ -426,7 +426,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
             child: ElevatedButton(
               onPressed: _saveAll,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
+                backgroundColor: context.palette.accent,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
               ),
@@ -540,16 +540,16 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
             hintText: '搜索歌曲或歌手',
             hintStyle: const TextStyle(color: AppColors.textFaint),
             suffixIcon: _isSearching
-                ? const Padding(
+                ? Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.accent)),
+                            strokeWidth: 2, color: context.palette.accent)),
                   )
                 : IconButton(
-                    icon: const Icon(Icons.search, color: AppColors.accent),
+                    icon: Icon(Icons.search, color: context.palette.accent),
                     onPressed: _performSearch,
                   ),
             filled: true,
@@ -566,8 +566,8 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
         // Results
         Expanded(
           child: (_isSearching && _searchResults.isEmpty)
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppColors.accent))
+              ? Center(
+                  child: CircularProgressIndicator(color: context.palette.accent))
               : _searchResults.isEmpty
                   ? const Center(
                       child: Text('无结果',
@@ -651,9 +651,9 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.white12),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.content_paste, color: AppColors.accent, size: 18),
+            Icon(Icons.content_paste, color: context.palette.accent, size: 18),
             SizedBox(width: 10),
             Expanded(
               child: Text(

@@ -515,7 +515,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             // Layer 1: Content Pages
             Column(
               children: [
-                // Top Tab Header Selector ("聆听" | "搜索") — sliding pill
+                // Top Tab Header Selector ("主页" | "搜索") — sliding pill
                 SafeArea(
                   bottom: false,
                   minimum: const EdgeInsets.only(top: 12),
@@ -525,10 +525,15 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                       children: [
                         Expanded(
                           child: SegmentTabs(
-                            labels: const ['聆听', '搜索'],
+                            labels: const ['主页', '搜索'],
                             animation: _pageFraction,
                             onTap: _onTabTap,
                           ),
+                        ),
+                        IconButton(
+                          tooltip: '设置',
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
                         ),
                         IconButton(
                           tooltip: BiliAuthController.instance.session?.isLoggedIn == true ? '已登录' : '登录',
@@ -537,21 +542,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                               ? CircleAvatar(radius: 15, backgroundImage: NetworkImage(BiliAuthController.instance.session!.face!))
                               : Icon(Icons.account_circle_outlined, color: context.palette.textSecondary),
                         ),
-                        IconButton(
-                          tooltip: '设置',
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
-                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4, right: 6),
-                          child: Image.asset('assets/logo.png', height: 32),
-                        ),
                       ],
                     ),
                   ),
                 ),
 
-                // Swipeable PageView (聆听 & 搜索)
+                // Swipeable PageView (主页 & 搜索)
                 Expanded(
                   child: PageView(
                     controller: _pageController,

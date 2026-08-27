@@ -38,14 +38,14 @@ class LyricResultRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: isCurrent
             ? AppColors.success12
-            : (isUserPasted ? AppColors.accent12 : AppColors.white06),
+            : (isUserPasted ? context.palette.accent12 : AppColors.white06),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isSelected
-              ? AppColors.accent
+              ? context.palette.accent
               : (isCurrent
                   ? AppColors.success50
-                  : (isUserPasted ? AppColors.accent50 : AppColors.white12)),
+                  : (isUserPasted ? context.palette.accent50 : AppColors.white12)),
           width: isSelected || isUserPasted || isCurrent ? 1.5 : 1.0,
         ),
       ),
@@ -127,7 +127,7 @@ class LyricResultRow extends StatelessWidget {
                       : Icons.radio_button_unchecked),
               color: isCurrent
                   ? AppColors.success
-                  : (isSelected ? AppColors.accent : AppColors.textFaint),
+                  : (isSelected ? context.palette.accent : AppColors.textFaint),
               size: 24,
             ),
             onPressed: isCurrent ? null : onApply,
