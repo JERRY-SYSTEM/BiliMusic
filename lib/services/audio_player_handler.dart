@@ -114,6 +114,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> persistPlaybackState() => _persistState();
   LoopMode get loopMode => _loopMode;
   bool get isShuffle => _isShuffle;
+  bool get canSkipPrevious {
+    if (_playlist.length < 2 || _currentIndex < 0) return false;
+    return true;
+  }
+
+  bool get canSkipNext {
+    if (_playlist.length < 2 || _currentIndex < 0) return false;
+    return true;
+  }
 
   BiliBeatAudioHandler() {
     _initAudioPlayerListeners();
@@ -167,12 +176,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       if (_currentIndex < 0 || _currentIndex >= _playlist.length) _currentIndex = 0;
       _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
       _resumePosition = Duration(milliseconds: (map['positionMs'] as num?)?.toInt() ?? 0);
-      _restoredWasPlaying = map['wasPlaying'] == true;
+      // Restore the queue without starting native playback during bootstrap.
+      // The old auto-resume path could race Flutter's first frame and leave
+      // the app behind a white loading surface. The saved position is kept;
+      // explicit play will resume from it.
+      _restoredWasPlaying = false;
       _emitQueue();
       _currentTrackController.add(currentTrack);
       _duration = Duration(seconds: currentTrack?.duration ?? 0);
       if (currentTrack != null) _updateMediaItem(currentTrack!);
-      if (_restoredWasPlaying) await _startCurrent(autoplay: true, initialPosition: _resumePosition);
     } catch (e) {
       debugPrint('Playback queue restore failed: $e');
     }
@@ -417,7 +429,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     // Cold restore: we have a logical track but an empty native queue.
     if (_queueSource.length == 0 && currentTrack != null) {
-      await _startCurrent(autoplay: true);
+      final resumePosition = _resumePosition;
+      _resumePosition = Duration.zero;
+      await _startCurrent(
+        autoplay: true,
+        initialPosition: resumePosition,
+      );
       return;
     }
     // Nothing loaded at all: playing would be a lie the UI then renders as
@@ -470,15 +487,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       currentIndex: _currentIndex,
       shuffle: _isShuffle,
     );
-    if (next != null && (next != 0 || _playlist.length == 1 || _isShuffle)) {
+    if (next != null) {
       // Use the same logical transition for both a prefetched and a not-yet-
       // queued track.  Calling seekToNext() directly leaves [_currentIndex]
       // stale until currentIndexStream happens to arrive; that event can be
       // filtered while a queue rebuild is settling, leaving the audio and UI
       // on different tracks.
       await _playAtIndex(next);
-    } else if (_loopMode != LoopMode.off) {
-      await _playAtIndex(0);
     } else {
       await seek(Duration.zero);
       await pause();
@@ -502,13 +517,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     final canMovePrevious = _isShuffle
         ? prev != null && (prev != _currentIndex || _playlist.length == 1)
-        : _currentIndex > 0;
+        : prev != null;
     if (prev != null && canMovePrevious) {
       await _playAtIndex(prev);
-    } else if (_loopMode != LoopMode.off) {
-      await _playAtIndex(_playlist.length - 1);
     } else {
-      await seek(Duration.zero);
+      await _playAtIndex(_playlist.length - 1);
     }
   }
 
@@ -686,7 +699,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _positionController.add(Duration.zero);
       _onActiveTrackChanged(_playlist[index]);
       await _player.seek(Duration.zero, index: playerIndex);
-      if (!_isPlaying) await _player.play();
+      // Seeking to a child after the previous item completed does not always
+      // clear just_audio's completed/playWhenReady state. Explicit navigation
+      // must actively start the selected child, otherwise the UI advances
+      // while the old audio remains at (or restarts from) its end position.
+      await _player.play();
       // currentIndexStream is asynchronous and can be suppressed by a
       // just_audio implementation when seeking to an already queued item.
       // Reconcile after the seek as well, so the UI cannot remain on the
@@ -766,27 +783,72 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       await playTrack(track);
       return;
     }
-    if (_playlist.any((item) => item.id == track.id)) {
-      final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
-      if (oldIndex == _currentIndex + 1) return;
-      _playlist.removeAt(oldIndex);
-      _naturalOrder.removeWhere((item) => item.id == track.id);
+    final activeId = currentTrack?.id;
+    if (activeId == null) return;
+
+    // Adding a child can synchronously/asynchronously produce a native index
+    // event. During this transaction that event is not a logical navigation
+    // event: the current item must remain the audible item.
+    _isRebuilding = true;
+    try {
+      if (_playlist.any((item) => item.id == track.id)) {
+        final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
+        if (oldIndex == _currentIndex + 1 || oldIndex == _currentIndex) return;
+        _playlist.removeAt(oldIndex);
+        _naturalOrder.removeWhere((item) => item.id == track.id);
+        if (oldIndex < _currentIndex) {
+          _currentIndex--;
+          // The native queue is a window into the logical playlist. If the
+          // removed item was before that window, its logical origin moves too;
+          // leaving the old base makes the next native index announce the
+          // wrong track (or replay the current track from zero).
+          if (oldIndex < _queueBaseIndex) _queueBaseIndex--;
+        }
+      }
+
+      final path = await AudioDownloadService.ensureDownloaded(track);
+      // The current track may have been changed by another user action while
+      // the download was running. Do not insert into a different queue.
+      if (_currentIndex < 0 ||
+          currentTrack?.id != activeId) {
+        return;
+      }
+
+      final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
+      _playlist.insert(insertIndex, track);
+      _naturalOrder.insert(
+        insertIndex.clamp(0, _naturalOrder.length).toInt(),
+        track,
+      );
+      _queueManager.syncAfterQueueChange(
+        queue: _playlist,
+        currentIndex: _currentIndex,
+      );
+      _queueManager.prioritizeNext(
+        queue: _playlist,
+        currentIndex: _currentIndex,
+        trackId: track.id,
+        shuffle: _isShuffle,
+      );
+
+      final nativeCurrent = _player.currentIndex;
+      if (nativeCurrent != null && nativeCurrent < _queueSource.length) {
+        final child = _queueSource.children[nativeCurrent];
+        final tag = child is ja.IndexedAudioSource ? child.tag : null;
+        if (tag is Track && tag.id == activeId) {
+          await _queueSource.insert(
+            nativeCurrent + 1,
+            ja.AudioSource.file(path, tag: track),
+          );
+        }
+      }
+    } finally {
+      _isRebuilding = false;
     }
-    final path = await AudioDownloadService.ensureDownloaded(track);
-    final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
-    _playlist.insert(insertIndex, track);
-    _naturalOrder.insert(insertIndex.clamp(0, _naturalOrder.length).toInt(), track);
-    _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
-    _queueManager.prioritizeNext(
-      queue: _playlist,
-      currentIndex: _currentIndex,
-      trackId: track.id,
-      shuffle: _isShuffle,
-    );
-    final nativeIndex = (_player.currentIndex ?? 0) + 1;
-    if (nativeIndex <= _queueSource.length) {
-      await _queueSource.insert(nativeIndex, ja.AudioSource.file(path, tag: track));
-    }
+
+    // Reconcile from the native child's tag, never from the index event that
+    // occurred while the insertion transaction was in flight.
+    _reconcileActiveTrack();
     _emitQueue();
     _schedulePersist(immediate: true);
   }

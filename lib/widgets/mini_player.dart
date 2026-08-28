@@ -27,7 +27,7 @@ class MiniPlayer extends StatelessWidget {
   final ValueNotifier<Duration> positionNotifier;
   final ValueNotifier<Duration> durationNotifier;
   final VoidCallback onPlayPause;
-  final VoidCallback onNext;
+  final VoidCallback? onNext;
   final VoidCallback? onPrevious;
   final VoidCallback onTap;
 
@@ -92,19 +92,21 @@ class MiniPlayer extends StatelessWidget {
       child: ClipRRect(
         borderRadius: cardRadius,
         child: DecoratedBox(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             // The page's background, not a lighter "elevated" surface. The
             // card is the page folded down; a different shade makes it a
             // different object, and the morph turns into a colour change.
-            color: AppColors.background,
-            border: Border(top: BorderSide(color: AppColors.hairline)),
+            color: context.palette.background,
+            border: Border(top: BorderSide(color: context.palette.hairline)),
             borderRadius: cardRadius,
           ),
           child: Padding(
             padding: EdgeInsets.only(bottom: bottomInset(context)),
             child: SizedBox(
               height: contentHeight,
-              child: currentTrack == null ? _emptyState() : _activePlayer(context),
+              child: currentTrack == null
+                  ? _emptyState(context)
+                  : _activePlayer(context),
             ),
           ),
         ),
@@ -112,8 +114,8 @@ class MiniPlayer extends StatelessWidget {
     );
   }
 
-  Widget _emptyState() {
-    return const Padding(
+  Widget _emptyState(BuildContext context) {
+    return Padding(
       padding: EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
@@ -122,7 +124,7 @@ class MiniPlayer extends StatelessWidget {
           Expanded(
             child: Text('选一首歌开始播放',
                 style: TextStyle(
-                    color: AppColors.textMuted,
+                    color: context.palette.textMuted,
                     fontSize: 13.5,
                     fontWeight: FontWeight.w500,
                     letterSpacing: -0.1)),
@@ -146,7 +148,7 @@ class MiniPlayer extends StatelessWidget {
         final v = details.primaryVelocity ?? 0;
         if (v < -220) {
           Haptics.selection();
-          onNext();
+          onNext?.call();
         } else if (v > 220 && onPrevious != null) {
           Haptics.selection();
           onPrevious!();
@@ -185,8 +187,8 @@ class MiniPlayer extends StatelessWidget {
                       children: [
                         MarqueeText(
                           text: track.title,
-                          style: const TextStyle(
-                            color: AppColors.textPrimary,
+                          style: TextStyle(
+                            color: context.palette.textPrimary,
                             fontSize: 15,
                             height: 1.3,
                             fontWeight: FontWeight.w600,
@@ -197,8 +199,8 @@ class MiniPlayer extends StatelessWidget {
                         MarqueeText(
                           text: track.uploader,
                           phase: 0.35,
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
+                          style: TextStyle(
+                            color: context.palette.textMuted,
                             fontSize: 12.5,
                             height: 1.35,
                           ),
@@ -215,10 +217,11 @@ class MiniPlayer extends StatelessWidget {
                 // the artwork it sits next to.
                 _playButton(context),
                 _iconButton(
+                  context,
                   Icons.skip_next_rounded,
-                  onPressed: () {
+                  onPressed: onNext == null ? null : () {
                     Haptics.selection();
-                    onNext();
+                    onNext?.call();
                   },
                 ),
               ],
@@ -284,7 +287,8 @@ class MiniPlayer extends StatelessWidget {
     );
   }
 
-  Widget _iconButton(IconData icon, {required VoidCallback onPressed}) {
+  Widget _iconButton(BuildContext context, IconData icon,
+      {required VoidCallback? onPressed}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onPressed,
@@ -292,7 +296,11 @@ class MiniPlayer extends StatelessWidget {
         width: 44,
         height: 46,
         child: Center(
-          child: Icon(icon, color: AppColors.textSecondary, size: 26),
+          child: Icon(icon,
+              color: onPressed == null
+                  ? context.palette.textFaint
+                  : context.palette.textSecondary,
+              size: 26),
         ),
       ),
     );
@@ -426,9 +434,9 @@ class _MiniSeekBarState extends State<_MiniSeekBar> {
                             child: Container(
                               width: 11,
                               height: 11,
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: AppColors.textPrimary,
+                                color: context.palette.textPrimary,
                               ),
                             ),
                           ),
@@ -459,8 +467,8 @@ class _EmptyArt extends StatelessWidget {
         color: AppColors.surfaceCard,
         borderRadius: BorderRadius.circular(AppRadius.md),
       ),
-      child: const Icon(Icons.music_note_rounded,
-          color: AppColors.textFaint, size: 22),
+      child: Icon(Icons.music_note_rounded,
+          color: context.palette.textFaint, size: 22),
     );
   }
 }

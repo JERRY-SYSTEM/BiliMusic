@@ -34,6 +34,7 @@ class NowPlayingSheet extends StatefulWidget {
   /// getting it wrong leaves the sheet stuck on one track for the whole
   /// session, never following the queue.
   final bool followHandler;
+  final VoidCallback? onQueueCleared;
 
   const NowPlayingSheet({
     super.key,
@@ -43,6 +44,7 @@ class NowPlayingSheet extends StatefulWidget {
     required this.durationNotifier,
     required this.lyricsNotifier,
     this.followHandler = false,
+    this.onQueueCleared,
   });
 
   @override
@@ -107,6 +109,9 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     }));
     _subs.add(h.loopModeStream.listen((m) {
       if (mounted) setState(() => _loopMode = m);
+    }));
+    _subs.add(h.queueStream.listen((_) {
+      if (mounted) setState(() {});
     }));
     _subs.add(DownloadManager.instance.updates.listen((changedId) {
       // Only this sheet's track matters: progress ticks for any other
@@ -213,7 +218,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       // The same backdrop as the rest of the app — the aura at the top, black
       // below — rather than a flat black page. The route morph paints its own
       // opaque surface underneath, so this stays honest during the transition.
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       body: PopScope(
         canPop: !_showEditor,
         onPopInvokedWithResult: (didPop, result) {
@@ -370,8 +375,8 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                color: AppColors.textSecondary, size: 30),
+            icon: Icon(Icons.keyboard_arrow_down_rounded,
+                color: context.palette.textSecondary, size: 30),
             tooltip: '收起',
             onPressed: () => Navigator.of(context).maybePop(),
           ),
@@ -392,7 +397,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
               _showLyrics ? Icons.lyrics_rounded : Icons.lyrics_outlined,
               color: _showLyrics && _isActive
                   ? context.palette.accent
-                  : (_isActive ? AppColors.textSecondary : AppColors.textFaint),
+                  : (_isActive ? context.palette.textSecondary : context.palette.textFaint),
               size: 22,
             ),
             tooltip: '歌词',
@@ -479,8 +484,8 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const HugeIcon(icon: HugeIcons.strokeRoundedEdit02,
-                      color: AppColors.textSecondary, size: 24),
+                  icon: HugeIcon(icon: HugeIcons.strokeRoundedEdit02,
+                      color: context.palette.textSecondary, size: 24),
                   tooltip: '编辑',
                   onPressed: () => _openEditor(lyricsTab: _showLyrics),
                 ),
@@ -515,9 +520,11 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         _modeButton(),
-        _skipButton(Icons.skip_previous_rounded, _isActive ? _prev : null),
+        _skipButton(Icons.skip_previous_rounded,
+            _isActive && widget.handler.canSkipPrevious ? _prev : null),
         _playButton(),
-        _skipButton(Icons.skip_next_rounded, _isActive ? _next : null),
+        _skipButton(Icons.skip_next_rounded,
+            _isActive && widget.handler.canSkipNext ? _next : null),
         _queueButton(),
       ],
     );
@@ -530,12 +537,15 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       width: 48,
       child: IconButton(
         icon: HugeIcon(icon: HugeIcons.strokeRoundedListMusic,
-            color: enabled ? AppColors.textMuted : AppColors.textFaint,
+            color: enabled ? context.palette.textMuted : context.palette.textFaint,
             size: 25),
         tooltip: '播放列表',
         onPressed: enabled
             ? () => showPlayerQueueSheet(
-                context: context, handler: widget.handler)
+                context: context,
+                handler: widget.handler,
+                onQueueCleared: widget.onQueueCleared,
+              )
             : null,
       ),
     );
@@ -545,8 +555,8 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     return IconButton(
       icon: Icon(icon,
           color: onPressed == null
-              ? AppColors.textFaint
-              : AppColors.textPrimary,
+              ? context.palette.textFaint
+              : context.palette.textPrimary,
           size: 40),
       onPressed: onPressed,
     );
@@ -624,10 +634,10 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: filled ? context.palette.primaryGradient : null,
-        color: filled ? null : AppColors.white12,
+        color: filled ? null : context.palette.surfaceCard,
         border: filled
             ? null
-            : Border.all(color: AppColors.hairlineStrong),
+            : Border.all(color: context.palette.hairline),
         boxShadow: filled
             ? [
                 BoxShadow(
