@@ -16,6 +16,7 @@ dependencies:
   crypto: ^3.0.7
   image_picker: ^1.2.3
   qr_flutter: ^4.1.0
+  hugeicons: ^1.1.7
 
 dev_dependencies:
   flutter_test:
