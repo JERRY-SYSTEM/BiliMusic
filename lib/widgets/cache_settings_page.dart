@@ -1,50 +1,111 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:hugeicons/hugeicons.dart';
+import '../services/audio_download_service.dart';
+import '../services/cache_inventory.dart';
 import '../services/database_service.dart';
+import '../theme/app_theme.dart';
+import 'cached_cover_image.dart';
 
 class CacheSettingsPage extends StatefulWidget {
   const CacheSettingsPage({super.key});
   @override State<CacheSettingsPage> createState() => _CacheSettingsPageState();
 }
+
 class _CacheSettingsPageState extends State<CacheSettingsPage> {
-  int _bytes = 0; bool _busy = false;
+  List<CacheBucket> _buckets = const [];
+  final Set<String> _selected = <String>{};
+  bool _loading = true;
+  bool _busy = false;
+
   @override void initState() { super.initState(); _reload(); }
   Future<void> _reload() async {
-    final dir = await getApplicationDocumentsDirectory();
-    var total = 0;
-    for (final entity in Directory(dir.path).listSync(recursive: true)) {
-      if (entity is File && (entity.path.contains('bilibeat_audio') || entity.path.contains('bilibeat_lyrics') || entity.path.contains('bilibeat_'))) total += entity.lengthSync();
-    }
-    if (mounted) setState(() => _bytes = total);
+    final buckets = await CacheInventory.load(await DatabaseService.getDownloadedTracks());
+    if (mounted) setState(() { _buckets = buckets; _loading = false; });
   }
-  Future<void> _clear() async {
-    if (_busy) return;
+  int get _total => _buckets.fold(0, (sum, bucket) => sum + bucket.bytes);
+  int get _selectedBytes => _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__')).fold(0, (sum, b) => sum + b.bytes);
+
+  Future<void> _deleteSelected() async {
+    if (_busy || _selectedBytes == 0) return;
     final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-      title: const Text('清理全部缓存？'), content: const Text('将删除图片、歌词、元信息和已下载音频，歌单中的本地音频也会被移除。'),
-      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('确认'))],
+      title: const Text('删除所选缓存？'),
+      content: Text('将删除 ${_selected.length} 个缓存项目，共约 ${_formatBytes(_selectedBytes)}。'),
+      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('删除'))],
     )) ?? false;
     if (!ok) return;
     setState(() => _busy = true);
-    final tracks = await DatabaseService.getDownloadedTracks();
-    for (final track in tracks) { await DatabaseService.removeDownloadedTrack(track); }
-    final dir = await getApplicationDocumentsDirectory();
-    for (final entity in Directory(dir.path).listSync(recursive: true)) {
-      if (entity is File && (entity.path.endsWith('.part') || entity.path.contains('bilibeat_audio'))) { try { await entity.delete(); } catch (_) {} }
+    for (final bucket in _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__'))) {
+      if (bucket.track != null) {
+        await AudioDownloadService.deleteAllForTrack(bucket.track!);
+        await DatabaseService.removeCachedLyrics(bucket.track!.id);
+        await DatabaseService.removeDownloadedTrack(bucket.track!);
+      }
+      for (final file in [...bucket.files, ...bucket.coverFiles]) { try { await file.delete(); } catch (_) {} }
     }
-    final lyrics = File('${dir.path}/bilibeat_lyrics.json');
-    if (await lyrics.exists()) await lyrics.delete();
-    final support = await getApplicationSupportDirectory();
-    final covers = Directory('${support.path}/bilibeat_covers');
-    if (await covers.exists()) await covers.delete(recursive: true);
+    _selected.clear();
     await _reload();
     if (mounted) setState(() => _busy = false);
   }
-  @override Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('缓存管理')),
-    body: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text('当前缓存约 ${( _bytes / 1024 / 1024).toStringAsFixed(1)} MB'), const SizedBox(height: 24),
-      FilledButton.icon(onPressed: _busy ? null : _clear, icon: const Icon(Icons.delete_sweep_outlined), label: Text(_busy ? '清理中…' : '清理全部缓存')),
-    ])),
-  );
+
+  void _toggleAll() => setState(() {
+    final keys = _buckets.map((b) => b.track?.id ?? '__other__').toSet();
+    if (_selected.length == keys.length) { _selected.clear(); } else { _selected..clear()..addAll(keys); }
+  });
+
+  @override Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Scaffold(
+      appBar: AppBar(title: const Text('缓存管理'), actions: [IconButton(onPressed: _loading ? null : _toggleAll, tooltip: '全选/取消全选', icon: const HugeIcon(icon: HugeIcons.strokeRoundedMore03))]),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    children: [
+                      Text('缓存总量 ${_formatBytes(_total)}', style: TextStyle(color: palette.textSecondary)),
+                      const SizedBox(height: 12),
+                      if (_buckets.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Center(child: Text('暂无缓存', style: TextStyle(color: palette.textSecondary))),
+                        )
+                      else
+                        ..._buckets.map(_bucketTile),
+                    ],
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02),
+                      label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _bucketTile(CacheBucket bucket) {
+    final key = bucket.track?.id ?? '__other__';
+    final track = bucket.track;
+    return CheckboxListTile(
+      value: _selected.contains(key),
+      onChanged: _busy ? null : (value) => setState(() => value == true ? _selected.add(key) : _selected.remove(key)),
+      secondary: track == null ? HugeIcon(icon: HugeIcons.strokeRoundedFolderUnknown, color: context.palette.accent) : (track.coverUrl.isEmpty ? HugeIcon(icon: HugeIcons.strokeRoundedHeadphones, color: context.palette.accent) : ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: CachedCoverImage(url: track.coverUrl, width: 48, height: 48))),
+      title: Text(track?.title ?? '其它', maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(track == null ? '无法关联到具体歌曲的缓存' : '${track.uploader} · ${_formatBytes(bucket.bytes)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+      controlAffinity: ListTileControlAffinity.trailing,
+    );
+  }
 }
+
+String _formatBytes(int bytes) => bytes < 1024 * 1024 ? '${(bytes / 1024).toStringAsFixed(1)} KB' : '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';

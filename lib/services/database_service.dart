@@ -586,6 +586,11 @@ class DatabaseService {
     return _lyricsCache[trackId];
   }
 
+  static Future<void> removeCachedLyrics(String trackId) async {
+    await _ensureLoaded();
+    if (_lyricsCache.remove(trackId) != null) await _persistLyrics();
+  }
+
   static Future<void> _persistLyrics() async {
     try {
       final dir = await _docs();

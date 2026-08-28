@@ -173,6 +173,18 @@ class AudioDownloadService {
     return deleted;
   }
 
+  /// Removes every quality variant belonging to a track.
+  static Future<void> deleteAllForTrack(Track track) async {
+    final dir = await _dir();
+    final prefix = 'audio_${_key(track)}';
+    for (final entity in await Directory(dir).list().toList()) {
+      if (entity is File && entity.uri.pathSegments.last.startsWith(prefix)) {
+        try { await entity.delete(); } catch (_) {}
+      }
+    }
+    _downloadedMemo.removeWhere((key, _) => key.startsWith('${_key(track)}_'));
+  }
+
   /// Ensures [track]'s audio is fully downloaded and returns the local path.
   ///
   /// Idempotent and concurrency-safe: a second call for the same track while a
