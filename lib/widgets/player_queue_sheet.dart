@@ -8,22 +8,33 @@ import '../theme/haptics.dart';
 import 'cached_cover_image.dart';
 
   Future<void> showPlayerQueueSheet({
-  required BuildContext context,
-  required BiliBeatAudioHandler handler,
+    required BuildContext context,
+    required BiliBeatAudioHandler handler,
+    VoidCallback? onQueueCleared,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: context.palette.backgroundElevated,
-    builder: (_) => SafeArea(child: PlayerQueueSheet(handler: handler)),
+    builder: (_) => SafeArea(
+      child: PlayerQueueSheet(
+        handler: handler,
+        onQueueCleared: onQueueCleared,
+      ),
+    ),
   );
 }
 
 class PlayerQueueSheet extends StatelessWidget {
-  const PlayerQueueSheet({super.key, required this.handler});
+  const PlayerQueueSheet({
+    super.key,
+    required this.handler,
+    this.onQueueCleared,
+  });
 
   final BiliBeatAudioHandler handler;
+  final VoidCallback? onQueueCleared;
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +68,8 @@ class PlayerQueueSheet extends StatelessWidget {
                           Text('播放列表', style: AppTypography.title.copyWith(color: context.palette.textPrimary)),
                           const SizedBox(height: 4),
                           Text('${state.queue.length} 首 · $mode',
-                              style: AppTypography.bodyMedium),
+                              style: AppTypography.bodyMedium.copyWith(
+                                  color: context.palette.textSecondary)),
                         ],
                       ),
                     ),
@@ -101,9 +113,13 @@ class PlayerQueueSheet extends StatelessWidget {
                                   ],
                                 ),
                               );
-                              if (confirmed == true) await handler.clearQueue();
+                              if (confirmed == true) {
+                                await handler.clearQueue();
+                                onQueueCleared?.call();
+                              }
                             },
-                      icon: const Icon(Icons.delete_sweep_rounded),
+                      icon: Icon(Icons.delete_sweep_rounded,
+                          color: context.palette.textSecondary),
                     ),
                   ],
                 ),
@@ -186,12 +202,14 @@ class _QueueRow extends StatelessWidget {
                       Text(track.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: AppTypography.headline),
+                          style: AppTypography.headline.copyWith(
+                              color: context.palette.textPrimary)),
                       const SizedBox(height: 3),
                       Text(track.uploader,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: AppTypography.caption),
+                          style: AppTypography.caption.copyWith(
+                              color: context.palette.textMuted)),
                     ],
                   ),
                 ),

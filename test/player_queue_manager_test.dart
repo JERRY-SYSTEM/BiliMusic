@@ -44,4 +44,12 @@ void main() {
 
     expect(manager.previous(queue: queue, currentIndex: third, shuffle: true), second);
   });
+
+  test('explicit next and previous wrap at queue boundaries', () {
+    final queue = <Track>[_track('first'), _track('last')];
+    final manager = PlayerQueueManager();
+
+    expect(manager.next(queue: queue, currentIndex: 1, shuffle: false), 0);
+    expect(manager.previous(queue: queue, currentIndex: 0, shuffle: false), 1);
+  });
 }

@@ -162,6 +162,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   /// title/cover) and leave the docked player showing stale text.
   final TrackNotifier _currentTrack = TrackNotifier();
   final ValueNotifier<bool> _isPlaying = ValueNotifier(false);
+  final ValueNotifier<int> _queueRevision = ValueNotifier(0);
   final ValueNotifier<Duration> _positionNotifier =
       ValueNotifier(Duration.zero);
   final ValueNotifier<Duration> _durationNotifier =
@@ -187,6 +188,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     BiliAuthController.instance.addListener(_onAuthChanged);
     unawaited(BiliAuthController.instance.initialize());
     _initListeners();
+    _subs.add(_audioHandler.queueStream.listen((_) {
+      if (mounted) _queueRevision.value++;
+    }));
     _loadHistory();
   }
 
@@ -200,6 +204,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     _currentTrack.dispose();
     _recentlyPlayed.dispose();
     _isPlaying.dispose();
+    _queueRevision.dispose();
     _positionNotifier.dispose();
     _durationNotifier.dispose();
     _lyricsNotifier.dispose();
@@ -449,6 +454,13 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             durationNotifier: _durationNotifier,
             lyricsNotifier: _lyricsNotifier,
             followHandler: follow,
+            onQueueCleared: () {
+              if (_activeTabIndex != 0) {
+                setState(() => _activeTabIndex = 0);
+                _pageController.jumpToPage(0);
+              }
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -639,7 +651,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
               bottom: 0,
               child: ListenableBuilder(
                 key: _miniPlayerKey,
-                listenable: Listenable.merge([_currentTrack, _isPlaying]),
+                listenable: Listenable.merge([
+                  _currentTrack,
+                  _isPlaying,
+                  _queueRevision,
+                ]),
                 builder: (context, _) => MiniPlayer(
                 currentTrack: _currentTrack.value,
                 isPlaying: _isPlaying.value,
@@ -652,8 +668,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                     _audioHandler.play();
                   }
                 },
-                onNext: _audioHandler.skipToNext,
-                onPrevious: _audioHandler.skipToPrevious,
+                onNext: _audioHandler.canSkipNext
+                    ? _audioHandler.skipToNext
+                    : null,
+                onPrevious: _audioHandler.canSkipPrevious
+                    ? _audioHandler.skipToPrevious
+                    : null,
                 onSeek: _audioHandler.seek,
                 onTap: _openNowPlaying,
               ),
