@@ -125,6 +125,25 @@ class AudioDownloadService {
   /// True when a complete, verified audio file exists on disk for [track].
   static Future<bool> isDownloaded(Track track, {int? quality}) => isDownloadedById(_key(track), quality: quality);
 
+  /// True when any quality variant for [track] is cached. Playlist/search
+  /// entries do not retain the quality selected in the download dialog, so
+  /// checking only the default (quality 0) path incorrectly leaves the
+  /// download button visible after a successful high-quality download.
+  static Future<bool> isAnyQualityDownloaded(Track track) async {
+    final dir = await _dir();
+    final prefix = 'audio_${_key(track)}';
+    for (final entity in await Directory(dir).list().toList()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (!name.startsWith(prefix) || !name.endsWith('.ready')) continue;
+      final quality = name == '$prefix.ready'
+          ? null
+          : int.tryParse(name.substring(prefix.length + 1, name.length - 6));
+      if (await isDownloadedById(_key(track), quality: quality)) return true;
+    }
+    return false;
+  }
+
   /// String-id variant of [isDownloaded] for callers that only hold an id.
   static Future<bool> isDownloadedById(String id, {int? quality}) async {
     final cacheKey = '${id}_${quality ?? 0}';

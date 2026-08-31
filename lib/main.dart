@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -254,7 +255,14 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     if (!mounted || collection == null) return;
     final tracks = await BiliFavoritesService.fetchTracks(auth.session!, collection.id);
     if (!mounted || tracks.isEmpty) return;
-    await DatabaseService.createOnlinePlaylist(remoteId: collection.id, name: collection.name, coverUrl: collection.coverUrl, tracks: tracks);
+    await DatabaseService.createOnlinePlaylist(
+      remoteId: collection.id,
+      name: collection.name,
+      // A missing collection cover must stay missing so the playlist UI can
+      // render its default artwork; never substitute the first video cover.
+      coverUrl: collection.coverUrl,
+      tracks: tracks,
+    );
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入在线歌单“${collection.name}”，共 ${tracks.length} 首')));
   }
 
@@ -262,7 +270,37 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     final session = BiliAuthController.instance.session;
     if (session == null || playlist.remoteId == null) return;
     final tracks = await BiliFavoritesService.fetchTracks(session, playlist.remoteId!);
-    await DatabaseService.createOnlinePlaylist(remoteId: playlist.remoteId!, name: playlist.name, coverUrl: playlist.coverUrl, tracks: tracks);
+    final collections = await BiliFavoritesService.fetchCollections(session);
+    BiliFavoriteCollection? remote;
+    for (final collection in collections) {
+      if (collection.id == playlist.remoteId) {
+        remote = collection;
+        break;
+      }
+    }
+    final oldById = {for (final t in playlist.tracks) t.id: t};
+    final mergedTracks = tracks.map((fresh) {
+      final old = oldById[fresh.id];
+      return old == null
+          ? fresh
+          : fresh.copyWith(
+              title: old.title,
+              uploader: old.uploader,
+              // Keep a deliberately stored cover, but allow sync to repair
+              // older entries whose cover was empty because the favorites
+              // endpoint omitted it.
+              coverUrl: old.coverUrl.trim().isEmpty ? fresh.coverUrl : old.coverUrl,
+            );
+    }).toList();
+    // The collection API is the source of truth. A null cover intentionally
+    // clears the old fallback cover and restores the default playlist art.
+    final syncedCover = remote?.coverUrl;
+    await DatabaseService.createOnlinePlaylist(
+      remoteId: playlist.remoteId!,
+      name: remote?.name ?? playlist.name,
+      coverUrl: syncedCover,
+      tracks: mergedTracks,
+    );
     if (mounted) {
       setState(() => _activePlaylistSheet = null);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('在线歌单同步完成')));
@@ -546,7 +584,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                         IconButton(
                           tooltip: '设置',
                           onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
-                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
+                          icon: HugeIcon(icon: HugeIcons.strokeRoundedSettings01, color: context.palette.textSecondary),
                         ),
                         IconButton(
                           tooltip: BiliAuthController.instance.session?.isLoggedIn == true ? '已登录' : '登录',

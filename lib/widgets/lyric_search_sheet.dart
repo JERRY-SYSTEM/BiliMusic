@@ -137,7 +137,7 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                           width: 48,
                           child: Center(
                             child: HugeIcon(
-                              icon: HugeIcons.strokeRoundedMusic,
+                              icon: HugeIcons.strokeRoundedMusic3,
                               size: 16,
                             ),
                           ),
