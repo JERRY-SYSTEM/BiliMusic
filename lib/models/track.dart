@@ -22,11 +22,23 @@ class Track {
   /// [title] (the display name) but must never touch this field — 智能识别
   /// parses THIS, or a polluted display title would be re-parsed forever.
   final String rawTitle;
+  /// Original uploader returned by Bilibili. Unlike [uploader], this is not
+  /// changed by the metadata editor and is used by the read-only info page.
+  final String? originalUploader;
   final String uploader;
   final String coverUrl;
   final int duration; // in seconds
   final String? audioUrl;
   final int? qualityId;
+  final int? publishTime;
+  final String? description;
+  final int? playCount;
+  final int? danmakuCount;
+  final int? likeCount;
+  final int? coinCount;
+  final int? favoriteCount;
+  final int? shareCount;
+  final int? replyCount;
 
   const Track({
     required this.id,
@@ -34,10 +46,21 @@ class Track {
     required this.cid,
     required this.title,
     required this.rawTitle,
+    this.originalUploader,
     required this.uploader,
     required this.coverUrl,
     required this.duration,
-    this.audioUrl, this.qualityId,
+    this.audioUrl,
+    this.qualityId,
+    this.publishTime,
+    this.description,
+    this.playCount,
+    this.danmakuCount,
+    this.likeCount,
+    this.coinCount,
+    this.favoriteCount,
+    this.shareCount,
+    this.replyCount,
   });
 
   Map<String, dynamic> toMap() {
@@ -47,11 +70,21 @@ class Track {
       'cid': cid,
       'title': title,
       'rawTitle': rawTitle,
+      'originalUploader': originalUploader,
       'uploader': uploader,
       'coverUrl': coverUrl,
       'duration': duration,
       'audioUrl': audioUrl,
       'qualityId': qualityId,
+      'publishTime': publishTime,
+      'description': description,
+      'playCount': playCount,
+      'danmakuCount': danmakuCount,
+      'likeCount': likeCount,
+      'coinCount': coinCount,
+      'favoriteCount': favoriteCount,
+      'shareCount': shareCount,
+      'replyCount': replyCount,
     };
   }
 
@@ -64,33 +97,64 @@ class Track {
       cid: map['cid'] ?? 0,
       title: map['title'] ?? '未知曲目',
       rawTitle: map['rawTitle'] as String? ?? map['title'] as String? ?? '',
+      originalUploader: map['originalUploader'] as String?,
       uploader: map['uploader'] ?? '未知UP主',
       coverUrl: map['coverUrl'] ?? '',
       duration: map['duration'] ?? 0,
       audioUrl: map['audioUrl'],
       qualityId: (map['qualityId'] as num?)?.toInt(),
+      publishTime: (map['publishTime'] as num?)?.toInt(),
+      description: map['description'] as String?,
+      playCount: (map['playCount'] as num?)?.toInt(),
+      danmakuCount: (map['danmakuCount'] as num?)?.toInt(),
+      likeCount: (map['likeCount'] as num?)?.toInt(),
+      coinCount: (map['coinCount'] as num?)?.toInt(),
+      favoriteCount: (map['favoriteCount'] as num?)?.toInt(),
+      shareCount: (map['shareCount'] as num?)?.toInt(),
+      replyCount: (map['replyCount'] as num?)?.toInt(),
     );
   }
 
   Track copyWith({
     String? title,
+    String? rawTitle,
     String? uploader,
     String? coverUrl,
     int? duration,
     String? audioUrl,
     int? qualityId,
+    String? originalUploader,
+    int? publishTime,
+    String? description,
+    int? playCount,
+    int? danmakuCount,
+    int? likeCount,
+    int? coinCount,
+    int? favoriteCount,
+    int? shareCount,
+    int? replyCount,
   }) {
     return Track(
       id: id,
       bvid: bvid,
       cid: cid,
       title: title ?? this.title,
-      rawTitle: rawTitle,
+      rawTitle: rawTitle ?? this.rawTitle,
+      originalUploader: originalUploader ?? this.originalUploader,
       uploader: uploader ?? this.uploader,
       coverUrl: coverUrl ?? this.coverUrl,
       duration: duration ?? this.duration,
       audioUrl: audioUrl ?? this.audioUrl,
       qualityId: qualityId ?? this.qualityId,
+      publishTime: publishTime ?? this.publishTime,
+      description: description ?? this.description,
+      playCount: playCount ?? this.playCount,
+      danmakuCount: danmakuCount ?? this.danmakuCount,
+      likeCount: likeCount ?? this.likeCount,
+      coinCount: coinCount ?? this.coinCount,
+      favoriteCount: favoriteCount ?? this.favoriteCount,
+      shareCount: shareCount ?? this.shareCount,
+      replyCount: replyCount ?? this.replyCount,
     );
   }
 

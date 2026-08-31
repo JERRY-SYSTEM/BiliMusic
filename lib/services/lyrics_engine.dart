@@ -15,6 +15,28 @@ class _ArtistResolution {
 
 class LyricsEngine {
   static final HttpClient _client = biliHttpClient();
+  static final Map<String, Future<String?>> _neteasePictureCache = {};
+
+  static String? _normalizePictureUrl(Object? value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    if (raw.startsWith('//')) return 'https:$raw';
+    return raw.replaceFirst('http:', 'https:');
+  }
+
+  static Future<String?> _fetchNetEasePictureUrl(String id) {
+    return _neteasePictureCache.putIfAbsent(id, () async {
+      final body = await _httpGet(
+        'https://music.163.com/api/song/detail?ids=%5B${Uri.encodeComponent(id)}%5D',
+        headers: const {'Referer': 'https://music.163.com'},
+      );
+      if (body == null) return null;
+      final songs = jsonDecode(body)['songs'] as List? ?? const [];
+      if (songs.isEmpty || songs.first is! Map) return null;
+      final album = (songs.first as Map)['album'];
+      return _normalizePictureUrl(album is Map ? album['picUrl'] : null);
+    });
+  }
 
   static Future<String?> _httpGet(String urlStr, {Map<String, String>? headers}) async {
     try {
@@ -33,6 +55,196 @@ class LyricsEngine {
     }
     return null;
   }
+
+  static Future<List<LyricSearchCandidate>> searchCandidates(
+    String keyword, {
+    LyricProvider provider = LyricProvider.netease,
+  }) async {
+    final query = keyword.trim();
+    if (query.isEmpty) return const [];
+    try {
+      switch (provider) {
+        case LyricProvider.netease:
+          final body = await _httpGet(
+            'https://music.163.com/api/search/get?s=${Uri.encodeComponent(query)}&type=1&limit=10',
+            headers: const {'Referer': 'https://music.163.com'},
+          );
+          final songs = body == null
+              ? const []
+              : (jsonDecode(body)['result']?['songs'] as List? ?? const []);
+          final candidates = await Future.wait(songs.whereType<Map>().map((song) async {
+            final id = song['id']?.toString() ?? '';
+            final artists = (song['artists'] as List? ?? const [])
+                .whereType<Map>()
+                .map((artist) => artist['name']?.toString() ?? '')
+                .where((name) => name.isNotEmpty)
+                .join(' / ');
+            final album = song['album'];
+            var pictureUrl = _normalizePictureUrl(album is Map
+                ? (album['picUrl'] ?? album['blurPicUrl'])
+                : null);
+            pictureUrl ??= id.isEmpty ? null : await _fetchNetEasePictureUrl(id);
+            return LyricSearchCandidate(
+              id: id,
+              title: song['name']?.toString() ?? '',
+              artist: artists,
+              provider: provider,
+              pictureUrl: pictureUrl,
+            );
+          }));
+          return candidates
+              .where((item) => item.id.isNotEmpty)
+              .toList(growable: false);
+        case LyricProvider.kugou:
+          final body = await _httpGet(
+            'https://songsearch.kugou.com/song_search_v2?keyword=${Uri.encodeComponent(query)}&page=1&pagesize=10&platform=WebFilter',
+          );
+          final songs = body == null
+              ? const []
+              : (jsonDecode(body)['data']?['lists'] as List? ?? const []);
+          return songs.whereType<Map>().map((song) => LyricSearchCandidate(
+                id: (song['FileHash'] ?? song['EMixSongID'] ?? '').toString(),
+                title: (song['SongName'] ?? '').toString(),
+                artist: (song['SingerName'] ?? '').toString(),
+                provider: provider,
+                pictureUrl: (song['Image'] ?? '')
+                    .toString()
+                    .replaceAll('{size}', '120'),
+              )).where((item) => item.id.isNotEmpty).toList(growable: false);
+        case LyricProvider.tencent:
+          final body = await _httpGet(
+            'https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${Uri.encodeComponent(query)}&p=1&n=10&format=json',
+            headers: const {'Referer': 'https://y.qq.com/'},
+          );
+          final songs = body == null
+              ? const []
+              : (jsonDecode(body)['data']?['song']?['list'] as List? ?? const []);
+          return songs.whereType<Map>().map((song) {
+            final artists = (song['singer'] as List? ?? const [])
+                .whereType<Map>()
+                .map((artist) => artist['name']?.toString() ?? '')
+                .where((name) => name.isNotEmpty)
+                .join(' / ');
+            return LyricSearchCandidate(
+              id: (song['songmid'] ?? '').toString(),
+              title: (song['songname'] ?? '').toString(),
+              artist: artists,
+              provider: provider,
+              pictureUrl: (song['albummid'] ?? '').toString().isEmpty
+                  ? null
+                  : 'https://y.gtimg.cn/music/photo_new/T002R120x120M000${song['albummid']}.jpg',
+            );
+          }).where((item) => item.id.isNotEmpty).toList(growable: false);
+      }
+    } catch (error) {
+      debugPrint('${provider.label} lyric search error: $error');
+      rethrow;
+    }
+  }
+
+  static Future<LyricsResult?> fetchCandidateLyrics(
+    LyricSearchCandidate candidate,
+  ) async {
+    try {
+      switch (candidate.provider) {
+        case LyricProvider.netease:
+          final body = await _httpGet(
+            'https://music.163.com/api/song/lyric?id=${Uri.encodeComponent(candidate.id)}&lv=-1&tv=-1',
+            headers: const {'Referer': 'https://music.163.com'},
+          );
+          if (body == null) return null;
+          final json = jsonDecode(body);
+          return _resultFromRawLyrics(
+            candidate,
+            (json['lrc']?['lyric'] ?? '').toString(),
+            (json['tlyric']?['lyric'] ?? '').toString(),
+          );
+        case LyricProvider.kugou:
+          final searchBody = await _httpGet(
+            'https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=${Uri.encodeComponent(candidate.id)}',
+          );
+          if (searchBody == null) return null;
+          final entries = jsonDecode(searchBody)['candidates'] as List? ?? const [];
+          if (entries.isEmpty || entries.first is! Map) return null;
+          final entry = entries.first as Map;
+          final id = entry['id']?.toString() ?? '';
+          final accessKey = entry['accesskey']?.toString() ?? '';
+          if (id.isEmpty || accessKey.isEmpty) return null;
+          final downloadBody = await _httpGet(
+            'https://lyrics.kugou.com/download?ver=1&client=pc&id=${Uri.encodeComponent(id)}&accesskey=${Uri.encodeComponent(accessKey)}&fmt=lrc&charset=utf8',
+          );
+          if (downloadBody == null) return null;
+          final content = jsonDecode(downloadBody)['content']?.toString() ?? '';
+          if (content.isEmpty) return null;
+          return _resultFromRawLyrics(
+            candidate,
+            utf8.decode(base64Decode(content)),
+            '',
+          );
+        case LyricProvider.tencent:
+          final body = await _httpGet(
+            'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${Uri.encodeComponent(candidate.id)}&format=json&nobase64=1',
+            headers: const {'Referer': 'https://y.qq.com/'},
+          );
+          if (body == null) return null;
+          final json = jsonDecode(body);
+          return _resultFromRawLyrics(
+            candidate,
+            _decodeTencentText((json['lyric'] ?? '').toString()),
+            _decodeTencentText((json['trans'] ?? '').toString()),
+          );
+      }
+    } catch (error) {
+      debugPrint('${candidate.provider.label} lyric fetch error: $error');
+      return null;
+    }
+  }
+
+  static LyricsResult? _resultFromRawLyrics(
+    LyricSearchCandidate candidate,
+    String rawLyrics,
+    String rawTranslation,
+  ) {
+    final lines = parseLrc(rawLyrics);
+    if (lines.isEmpty) return null;
+    final translations = parseLrc(rawTranslation);
+    if (translations.isNotEmpty) {
+      var translationIndex = 0;
+      for (var index = 0; index < lines.length; index++) {
+        final line = lines[index];
+        while (translationIndex < translations.length &&
+            translations[translationIndex].time < line.time - 0.5) {
+          translationIndex++;
+        }
+        if (translationIndex < translations.length &&
+            (translations[translationIndex].time - line.time).abs() < 0.5) {
+          lines[index] = LyricLine(
+            time: line.time,
+            text: line.text,
+            translation: translations[translationIndex].text,
+          );
+        }
+      }
+    }
+    return LyricsResult(
+      source: candidate.provider.apiName,
+      songTitle: candidate.title,
+      artistName: candidate.artist,
+      lines: lines,
+      isManual: true,
+    );
+  }
+
+  static String _decodeTencentText(String value) => value
+      .replaceAllMapped(
+        RegExp(r'&#(\d+);'),
+        (match) => String.fromCharCode(int.tryParse(match.group(1)!) ?? 0),
+      )
+      .replaceAll('&apos;', "'")
+      .replaceAll('&quot;', '"')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&');
 
   // Common noise words in B站 titles
   static final RegExp noiseKeywords = RegExp(

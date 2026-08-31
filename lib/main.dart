@@ -311,11 +311,14 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
         bool isCacheValid = false;
         if (cached != null && cached.lines.isNotEmpty && cached.source != 'none') {
-          // 'user' (pasted/edited LRC) and 'current' (re-applied with an
-          // offset) are deliberate user choices. Title-validating them fails
+          // Manually selected provider results, pasted/edited LRC and
+          // re-applied offset results are deliberate user choices. Validating
+          // them against the auto-cleaned title can fail
           // — a paste is cached as 「自定义歌词」 — and the refetch below then
           // silently overwrote the user's lyrics with the provider's.
-          if (cached.source == 'user' || cached.source == 'current') {
+          if (cached.isManual ||
+              cached.source == 'user' ||
+              cached.source == 'current') {
             isCacheValid = true;
           } else {
             final cachedTitle = cached.songTitle ?? '';

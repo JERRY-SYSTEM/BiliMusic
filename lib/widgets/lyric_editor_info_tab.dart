@@ -61,12 +61,12 @@ class LyricEditorInfoTab extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
-                                color: AppColors.backgroundElevated,
+                                color: context.palette.backgroundElevated,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: AppColors.hairlineStrong),
+                                border: Border.all(color: context.palette.hairline),
                               ),
-                              child: const Icon(Icons.image_outlined,
-                                  color: AppColors.textSecondary, size: 18),
+                              child: Icon(Icons.image_outlined,
+                                  color: context.palette.textSecondary, size: 18),
                             ),
                           ),
                         ],
@@ -75,9 +75,9 @@ class LyricEditorInfoTab extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 24),
-                _infoField(titleController, '歌名'),
+                _infoField(context, titleController, '歌名'),
                 const SizedBox(height: 12),
-                _infoField(artistController, '歌手 / UP主'),
+                _infoField(context, artistController, '歌手 / UP主'),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -115,22 +115,23 @@ class LyricEditorInfoTab extends StatelessWidget {
     );
   }
 
-  Widget _infoField(TextEditingController ctrl, String label) {
+  Widget _infoField(
+      BuildContext context, TextEditingController ctrl, String label) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(
-                color: AppColors.textSecondary,
+            style: TextStyle(
+                color: context.palette.textSecondary,
                 fontSize: 12,
                 fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,
-          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+          style: TextStyle(color: context.palette.textPrimary, fontSize: 14),
           decoration: InputDecoration(
             filled: true,
-            fillColor: AppColors.white06,
+            fillColor: context.palette.surfaceCard,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none),
