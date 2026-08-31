@@ -20,6 +20,7 @@ import 'track_options_menu.dart';
 import 'cached_cover_image.dart';
 import 'track_download_button.dart';
 import '../utils/snack.dart';
+import '../utils/format.dart';
 
 class PlaylistDetailSheet extends StatefulWidget {
   final Playlist playlist;
@@ -89,6 +90,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
       .where((t) => !DownloadManager.instance.isDownloading(t.id))
       .toList();
   Set<String> _dlIds = {};
+  Set<String> _cachedIds = {};
 
   @override
   void initState() {
@@ -96,6 +98,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
     _currentPlaylist = _detached(widget.playlist);
     _dlIds =
         DownloadManager.instance.activeTasks.map((t) => t.track.id).toSet();
+    _loadCachedIds();
     // Metadata can be edited from the now-playing page stacked on top of this
     // sheet; without this the sheet kept rendering the pre-edit title.
     _libSub = DatabaseService.libraryUpdateStream.listen((_) => _refresh());
@@ -107,6 +110,11 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         if (mounted) setState(() {});
       }
     });
+  }
+
+  Future<void> _loadCachedIds() async {
+    final tracks = await DatabaseService.getDownloadedTracks();
+    if (mounted) setState(() => _cachedIds = tracks.map((t) => t.id).toSet());
   }
 
   @override
@@ -149,6 +157,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
       ));
     }
     if (mounted) setState(() => _currentPlaylist = updated);
+    await _loadCachedIds();
     widget.onPlaylistUpdated?.call();
   }
 
@@ -525,11 +534,28 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                           height: 1.3),
                     ),
                   ),
-                  Text(
-                    track.uploader,
-                    style: TextStyle(
-                        color: context.palette.textMuted,
-                        fontSize: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          track.uploader,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: context.palette.textMuted,
+                              fontSize: 12),
+                        ),
+                      ),
+                      if (_cachedIds.contains(track.id) && track.duration > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text(
+                            formatDuration(Duration(seconds: track.duration)),
+                            style: TextStyle(
+                                color: context.palette.textMuted, fontSize: 12),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),

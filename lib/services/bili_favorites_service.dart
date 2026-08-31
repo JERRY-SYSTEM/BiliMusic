@@ -20,15 +20,45 @@ class BiliFavoritesService {
     _check(json);
     final data = Map<String, dynamic>.from(json['data'] as Map? ?? const {});
     final list = data['list'] as List? ?? const [];
-    return list.map((item) {
+    final collections = list.map((item) {
       final map = Map<String, dynamic>.from(item as Map);
       return BiliFavoriteCollection(
         id: '${map['id'] ?? ''}',
         name: map['title'] as String? ?? '未命名收藏夹',
         itemCount: (map['media_count'] as num? ?? 0).toInt(),
-        coverUrl: map['cover'] as String?,
+        // `list-all.cover` is not reliable: Bilibili may populate it with
+        // the first video's cover instead of the collection's own cover.
+        // The canonical cover is fetched from folder/info below.
+        coverUrl: null,
       );
     }).where((collection) => collection.id.isNotEmpty).toList();
+    return Future.wait(collections.map((collection) async {
+      final cover = await _fetchCollectionCover(session, collection.id);
+      return BiliFavoriteCollection(
+        id: collection.id,
+        name: collection.name,
+        itemCount: collection.itemCount,
+        coverUrl: cover,
+      );
+    }));
+  }
+
+  static Future<String?> _fetchCollectionCover(
+      BiliSession session, String collectionId) async {
+    try {
+      final json = await _get(
+        '$_base/x/v3/fav/folder/info?media_id=${Uri.encodeQueryComponent(collectionId)}&web_location=333.1387',
+        session.cookie,
+      );
+      _check(json);
+      final data = json['data'];
+      if (data is! Map) return null;
+      return _normalizeCoverUrl(data['cover'] as String?);
+    } catch (_) {
+      // Cover enrichment must not prevent the user from importing a folder.
+      // Returning null also deliberately selects the UI's default artwork.
+      return null;
+    }
   }
 
   static Future<List<Track>> fetchTracks(BiliSession session, String collectionId) async {
@@ -53,7 +83,7 @@ class BiliFavoritesService {
     if ((map['type'] as num? ?? 2).toInt() != 2) return null;
     var bvid = map['bvid'] as String? ?? map['bv_id'] as String? ?? '';
     var title = map['title'] as String? ?? '';
-    var cover = (map['cover'] as String? ?? '').replaceFirst('http:', 'https:');
+    var cover = _normalizeCoverUrl(map['cover'] as String?) ?? '';
     final upper = map['upper'] is Map ? Map<String, dynamic>.from(map['upper'] as Map) : const <String, dynamic>{};
     var uploader = upper['name'] as String? ?? '';
     var duration = (map['duration'] as num? ?? 0).toInt();
@@ -65,7 +95,11 @@ class BiliFavoritesService {
       if (info.isEmpty) return null;
       return info.first;
     }
-    if (cid == 0 || title.isEmpty || uploader.isEmpty) {
+    // The favorites endpoint often omits `cover` while still returning all
+    // other track metadata. Fetch the canonical video metadata in that case
+    // as well, otherwise the synced playlist permanently stores an empty
+    // cover URL and the UI has nothing to load.
+    if (cid == 0 || title.isEmpty || uploader.isEmpty || cover.isEmpty) {
       final info = await BilibiliSdk.fetchVideoInfo(bvid);
       if (info.isNotEmpty) {
         final first = info.first;
@@ -93,5 +127,12 @@ class BiliFavoritesService {
   static void _check(Map<String, dynamic> json) {
     final code = (json['code'] as num? ?? -1).toInt();
     if (code != 0) throw StateError(json['message'] as String? ?? '收藏夹请求失败');
+  }
+
+  static String? _normalizeCoverUrl(String? value) {
+    final cover = value?.trim() ?? '';
+    if (cover.isEmpty) return null;
+    if (cover.startsWith('//')) return 'https:$cover';
+    return cover.replaceFirst('http:', 'https:');
   }
 }

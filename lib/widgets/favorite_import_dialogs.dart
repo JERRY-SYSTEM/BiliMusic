@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:hugeicons/hugeicons.dart';
 import '../models/bili_favorite_collection.dart';
 import '../models/bili_session.dart';
 import '../models/track.dart';
@@ -45,7 +46,7 @@ class _FavoritePickerDialogState extends State<FavoritePickerDialog> {
                     final item = collections[index];
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.folder_open_rounded),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedPlaylist01),
                       title: Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text('${item.itemCount} 个内容'),
                       onTap: () => Navigator.pop(context, item),

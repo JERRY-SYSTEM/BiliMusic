@@ -374,6 +374,9 @@ class DatabaseService {
       id: old.id,
       name: newName.trim().isEmpty ? old.name : newName.trim(),
       coverUrl: old.coverUrl,
+      remoteId: old.remoteId,
+      isOnline: old.isOnline,
+      lastSyncedAt: old.lastSyncedAt,
       tracks: old.tracks,
     );
     await _persistPlaylists();
@@ -389,6 +392,9 @@ class DatabaseService {
       id: old.id,
       name: old.name,
       coverUrl: path,
+      remoteId: old.remoteId,
+      isOnline: old.isOnline,
+      lastSyncedAt: old.lastSyncedAt,
       tracks: old.tracks,
     );
     await _persistPlaylists();
