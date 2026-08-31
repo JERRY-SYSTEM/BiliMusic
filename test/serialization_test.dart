@@ -17,10 +17,20 @@ Track _track({String id = 'BV1_p1', String? audioUrl}) => Track(
       cid: 42,
       title: '显示标题',
       rawTitle: '【原始】B站视频标题',
+      originalUploader: '原UP主',
       uploader: 'UP主',
       coverUrl: 'https://example.com/cover.jpg',
       duration: 245,
       audioUrl: audioUrl,
+      publishTime: 1700000000,
+      description: '视频简介',
+      playCount: 1,
+      danmakuCount: 2,
+      likeCount: 3,
+      coinCount: 4,
+      favoriteCount: 5,
+      shareCount: 6,
+      replyCount: 7,
     );
 
 void main() {
@@ -34,10 +44,20 @@ void main() {
       expect(rt.cid, t.cid);
       expect(rt.title, t.title);
       expect(rt.rawTitle, t.rawTitle);
+      expect(rt.originalUploader, t.originalUploader);
       expect(rt.uploader, t.uploader);
       expect(rt.coverUrl, t.coverUrl);
       expect(rt.duration, t.duration);
       expect(rt.audioUrl, t.audioUrl);
+      expect(rt.publishTime, t.publishTime);
+      expect(rt.description, t.description);
+      expect(rt.playCount, t.playCount);
+      expect(rt.danmakuCount, t.danmakuCount);
+      expect(rt.likeCount, t.likeCount);
+      expect(rt.coinCount, t.coinCount);
+      expect(rt.favoriteCount, t.favoriteCount);
+      expect(rt.shareCount, t.shareCount);
+      expect(rt.replyCount, t.replyCount);
       expect(rt, t); // identity is the id — rehydrated tracks must compare equal
     });
 
@@ -143,6 +163,7 @@ void main() {
         source: 'netease',
         songTitle: '歌名',
         artistName: '歌手',
+        isManual: true,
         lines: [
           LyricLine(time: 0, text: '第一行'),
           LyricLine(time: 12.34, text: '第二行', translation: '译'),
@@ -152,6 +173,7 @@ void main() {
       expect(rt.source, 'netease');
       expect(rt.songTitle, '歌名');
       expect(rt.artistName, '歌手');
+      expect(rt.isManual, isTrue);
       expect(rt.lines, hasLength(2));
       expect(rt.lines[1].time, 12.34);
       expect(rt.lines[1].translation, '译');
@@ -166,6 +188,7 @@ void main() {
 
       final bare = LyricsResult.fromMap(throughJson({'lines': []}));
       expect(bare.source, 'none');
+      expect(bare.isManual, isFalse);
       expect(bare.lines, isEmpty);
     });
   });

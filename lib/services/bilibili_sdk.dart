@@ -62,8 +62,21 @@ class BilibiliSdk {
     try {
       final body = await _httpGet(url);
       if (body != null) {
-        final json = jsonDecode(body);
-        if (json['code'] == 0 && json['data'] != null) {
+        return parseVideoInfoResponse(body);
+      }
+    } catch (e) {
+      debugPrint('Bilibili SDK error: $e');
+    }
+
+    return [];
+  }
+
+  /// Pure parser for `/x/web-interface/view`, exposed so response-shape
+  /// regressions can be covered without making network requests in tests.
+  static List<Track> parseVideoInfoResponse(String body) {
+    try {
+      final json = jsonDecode(body);
+      if (json['code'] == 0 && json['data'] != null) {
           final data = json['data'];
           final bvid = data['bvid'] as String;
           final title = data['title'] as String;
@@ -71,6 +84,9 @@ class BilibiliSdk {
           if (pic.startsWith('//')) pic = 'https:$pic';
           final owner = data['owner'] ?? {};
           final uploader = owner['name'] as String? ?? '未知UP主';
+          final stat = data['stat'] as Map? ?? const {};
+          final publishTime = (data['pubdate'] as num?)?.toInt();
+          final description = data['desc'] as String?;
           final totalDuration = data['duration'] as int? ?? 0;
           final pages = data['pages'] as List? ?? [];
 
@@ -82,9 +98,19 @@ class BilibiliSdk {
                 cid: data['cid'] as int? ?? 0,
                 title: title,
                 rawTitle: title,
+                originalUploader: uploader,
                 uploader: uploader,
                 coverUrl: pic,
                 duration: totalDuration,
+                publishTime: publishTime,
+                description: description,
+                playCount: (stat['view'] as num?)?.toInt(),
+                danmakuCount: (stat['danmaku'] as num?)?.toInt(),
+                likeCount: (stat['like'] as num?)?.toInt(),
+                coinCount: (stat['coin'] as num?)?.toInt(),
+                favoriteCount: (stat['favorite'] as num?)?.toInt(),
+                shareCount: (stat['share'] as num?)?.toInt(),
+                replyCount: (stat['reply'] as num?)?.toInt(),
               )
             ];
           }
@@ -101,18 +127,51 @@ class BilibiliSdk {
               cid: cid,
               title: pages.length > 1 ? '$title - P$pageNo: $partTitle' : title,
               rawTitle: title,
+              originalUploader: uploader,
               uploader: uploader,
               coverUrl: pic,
               duration: pageDuration,
+              publishTime: publishTime,
+              description: description,
+              playCount: (stat['view'] as num?)?.toInt(),
+              danmakuCount: (stat['danmaku'] as num?)?.toInt(),
+              likeCount: (stat['like'] as num?)?.toInt(),
+              coinCount: (stat['coin'] as num?)?.toInt(),
+              favoriteCount: (stat['favorite'] as num?)?.toInt(),
+              shareCount: (stat['share'] as num?)?.toInt(),
+              replyCount: (stat['reply'] as num?)?.toInt(),
             );
           }).toList();
-        }
       }
     } catch (e) {
-      debugPrint('Bilibili SDK error: $e');
+      debugPrint('Bilibili video info parse error: $e');
     }
-
     return [];
+  }
+
+  /// Loads the original Bilibili metadata for [track] while preserving the
+  /// title, artist and cover that the user may have edited locally.
+  static Future<Track> hydrateTrackDetails(Track track) async {
+    final tracks = await fetchVideoInfo(track.bvid);
+    if (tracks.isEmpty) return track;
+    final details = tracks.firstWhere(
+          (candidate) => candidate.id == track.id,
+          orElse: () => tracks.first,
+        );
+    return track.copyWith(
+      rawTitle: details.rawTitle,
+      originalUploader: details.originalUploader ?? details.uploader,
+      publishTime: details.publishTime,
+      description: details.description,
+      playCount: details.playCount,
+      danmakuCount: details.danmakuCount,
+      likeCount: details.likeCount,
+      coinCount: details.coinCount,
+      favoriteCount: details.favoriteCount,
+      shareCount: details.shareCount,
+      replyCount: details.replyCount,
+      duration: track.duration > 0 ? track.duration : details.duration,
+    );
   }
 
   // Fetch audio stream URL (prefers standard MP4/M4A container for native MediaPlayer compatibility)

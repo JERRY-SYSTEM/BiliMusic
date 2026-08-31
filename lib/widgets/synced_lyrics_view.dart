@@ -36,6 +36,7 @@ class SyncedLyricsView extends StatefulWidget {
   /// Whether the view should follow playback. False for a preview driven by a
   /// clock that never advances.
   final bool autoFollow;
+  final bool showTranslation;
 
   const SyncedLyricsView({
     super.key,
@@ -47,6 +48,7 @@ class SyncedLyricsView extends StatefulWidget {
     this.calibrating = false,
     this.onCalibrateTap,
     this.autoFollow = true,
+    this.showTranslation = true,
   });
 
   @override
@@ -62,6 +64,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
 
   /// While true the user is in control and auto-scroll stands down.
   bool _userBrowsing = false;
+  int? _selectionIndex;
   Timer? _resumeTimer;
 
   double _viewportHeight = 400;
@@ -98,6 +101,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         oldWidget.calibrating != widget.calibrating) {
       _heightCache.clear();
       _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+      _selectionIndex = null;
       _onPosition(force: true);
     }
   }
@@ -148,6 +152,38 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   void _beginBrowsing() {
     _resumeTimer?.cancel();
     if (!_userBrowsing && mounted) setState(() => _userBrowsing = true);
+    _updateSelection();
+  }
+
+  void _updateSelection() {
+    if (!_scrollController.hasClients || widget.lines.isEmpty) return;
+    final anchor = _scrollController.offset;
+    var accumulated = 0.0;
+    var closestIndex = 0;
+    var closestDistance = double.infinity;
+    for (var index = 0; index < widget.lines.length; index++) {
+      final height = _itemHeight(widget.lines[index], false);
+      final center = accumulated + height / 2;
+      final distance = (center - anchor).abs();
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+      if (center > anchor && distance > closestDistance) break;
+      accumulated += height;
+    }
+    if (_selectionIndex != closestIndex && mounted) {
+      setState(() => _selectionIndex = closestIndex);
+    }
+  }
+
+  void _seekToSelection() {
+    final index = _selectionIndex;
+    if (index == null || widget.onSeek == null) return;
+    Haptics.selection();
+    widget.onSeek!(widget.lines[index].time + widget.offset);
+    setState(() => _selectionIndex = null);
+    _resumeFollowing();
   }
 
   void _scheduleResume() {
@@ -159,7 +195,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   void _resumeFollowing() {
     _resumeTimer?.cancel();
     if (!mounted) return;
-    setState(() => _userBrowsing = false);
+    setState(() {
+      _userBrowsing = false;
+      _selectionIndex = null;
+    });
     _scrollToActive();
   }
 
@@ -174,7 +213,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     final activeHeight = _itemHeight(widget.lines[_activeIndex], true);
     final target = _topPadding +
         accumulated -
-        (_viewportHeight / 2) +
+        (_viewportHeight * 0.42) +
         (activeHeight / 2);
     final clamped =
         target.clamp(0.0, _scrollController.position.maxScrollExtent);
@@ -220,10 +259,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     final cached = _heightCache[key];
     if (cached != null) return cached;
 
-    double height = 28.0; // vertical padding: 14 + 14
-    height += _measureText(line.text, isActive ? 24.0 : 20.0,
-        isActive ? FontWeight.w700 : FontWeight.w600);
-    if (line.translation != null && line.translation!.isNotEmpty) {
+    double height = 36.0; // vertical padding: 18 + 18
+    height += _measureText(line.text, isActive ? 30.0 : 24.0,
+        isActive ? FontWeight.w800 : FontWeight.w500);
+    if (widget.showTranslation &&
+        line.translation != null &&
+        line.translation!.isNotEmpty) {
       height += 4.0;
       height += _measureText(line.translation!, isActive ? 16.0 : 14.0,
           FontWeight.w500);
@@ -270,9 +311,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                 if (notification is ScrollStartNotification &&
                     notification.dragDetails != null) {
                   _beginBrowsing();
+                } else if (notification is ScrollUpdateNotification &&
+                    _userBrowsing) {
+                  _updateSelection();
                 } else if (notification is ScrollEndNotification &&
                     _userBrowsing) {
-                  _scheduleResume();
+                  if (widget.onSeek == null) _scheduleResume();
                 }
                 return false;
               },
@@ -296,6 +340,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                 bottom: 8,
                 child: IgnorePointer(child: Center(child: _calibrationHint())),
               )
+            else if (_userBrowsing &&
+                _selectionIndex != null &&
+                widget.onSeek != null)
+              _selectionProgress()
             else if (_userBrowsing && widget.autoFollow)
               Positioned(
                 left: 0,
@@ -312,10 +360,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   Widget _lineTile(int index) {
     final line = widget.lines[index];
     final isActive = index == _activeIndex;
-    final distance = (index - _activeIndex).abs();
-    final opacity = isActive
+    final isSelected = _userBrowsing && index == _selectionIndex;
+    final focusIndex = _selectionIndex ?? _activeIndex;
+    final distance = (index - focusIndex).abs();
+    final opacity = isActive || isSelected
         ? 1.0
-        : (distance == 1 ? 0.5 : (distance == 2 ? 0.34 : 0.24));
+        : (distance == 1 ? 0.70 : (distance == 2 ? 0.52 : 0.36));
 
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.md),
@@ -333,7 +383,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         curve: AppMotion.standard,
         opacity: opacity,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -341,10 +391,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                 duration: AppMotion.slow,
                 curve: AppMotion.standard,
                 style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: isActive ? 24 : 20,
-                  height: 1.35,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                  color: isSelected
+                      ? context.palette.textSecondary
+                      : context.palette.textPrimary,
+                  fontSize: isActive ? 30 : 24,
+                  height: 1.25,
+                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w500,
                   letterSpacing: isActive ? -0.4 : -0.2,
                   shadows: isActive
                       ? [Shadow(color: context.palette.accent50, blurRadius: 18)]
@@ -352,7 +404,9 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                 ),
                 child: Text(line.text),
               ),
-              if (line.translation != null && line.translation!.isNotEmpty) ...[
+              if (widget.showTranslation &&
+                  line.translation != null &&
+                  line.translation!.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 AnimatedDefaultTextStyle(
                   duration: AppMotion.slow,
@@ -398,6 +452,73 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _selectionProgress() {
+    final index = _selectionIndex!;
+    final duration = Duration(
+      milliseconds: ((widget.lines[index].time + widget.offset) * 1000)
+          .round()
+          .clamp(0, 1 << 31)
+          .toInt(),
+    );
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final label = duration.inHours > 0
+        ? '${duration.inHours}:$minutes:$seconds'
+        : '$minutes:$seconds';
+    return Positioned(
+      top: _viewportHeight * 0.42 - 100,
+      left: 0,
+      right: 0,
+      child: SizedBox(
+        height: 200,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              left: 0,
+              right: 52,
+              child: Container(height: 1, color: context.palette.hairline),
+            ),
+            Positioned(
+              right: 0,
+              child: GestureDetector(
+                key: const Key('lyricSelectionPlayButton'),
+                onTap: _seekToSelection,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: context.palette.surfaceDeep.withValues(alpha: 0.86),
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.play_arrow_rounded,
+                            size: 14, color: context.palette.textSecondary),
+                        const SizedBox(width: 2),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: context.palette.textSecondary,
+                            fontSize: 11,
+                            height: 1,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
