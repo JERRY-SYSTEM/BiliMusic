@@ -425,14 +425,14 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   /// track. Loop-all either way; shuffle is the caller's choice, and it is set
   /// *before* the queue is handed over so the shuffle order is built around
   /// the track that starts.
-  void _playCollection(List<Track> tracks, {bool shuffle = false}) async {
+  Future<void> _playCollection(List<Track> tracks, {bool shuffle = false}) async {
     if (tracks.isEmpty) return;
     await _audioHandler.setShuffle(false);
     await _audioHandler.setLoopMode(LoopMode.all);
     if (!mounted) return;
     final first = tracks.first;
     _currentTrack.value = first;
-    _audioHandler.playTrack(first, newQueue: tracks);
+    await _audioHandler.playTrack(first, newQueue: tracks);
   }
 
   void _onPlayTrackOnly(Track track, {List<Track>? queue}) async {
