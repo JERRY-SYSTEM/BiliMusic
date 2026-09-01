@@ -34,7 +34,8 @@ class PlaybackQueueState {
 ///  * Loop/shuffle/advance logic lives in Dart; the native queue is only a
 ///    sliding window that mirrors the logical playlist around [_currentIndex].
 class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
-  final ja.AudioPlayer _player = ja.AudioPlayer();
+  final ja.AudioPlayer _player;
+  final Future<String> Function(Track) _ensureDownloaded;
   // ignore: deprecated_member_use
   final ja.ConcatenatingAudioSource _queueSource =
       // ignore: deprecated_member_use
@@ -61,6 +62,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   String? _prefetchingId;
   Duration _resumePosition = Duration.zero;
   Timer? _persistTimer;
+  Future<void> _persistOperation = Future<void>.value();
   bool _userPaused = false;
   bool _restoredWasPlaying = false;
   bool _recovering = false;
@@ -124,7 +126,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     return true;
   }
 
-  BiliBeatAudioHandler() {
+  BiliBeatAudioHandler({
+    ja.AudioPlayer? player,
+    Future<String> Function(Track)? ensureDownloaded,
+  })  : _player = player ?? ja.AudioPlayer(),
+        _ensureDownloaded =
+            ensureDownloaded ?? AudioDownloadService.ensureDownloaded {
     _initAudioPlayerListeners();
     unawaited(_configureAudioSession());
   }
@@ -204,20 +211,26 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> _persistState() async {
-    try {
-      final map = {
-        'queue': _playlist.map((t) => t.toMap()).toList(),
-        'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
-        'currentIndex': _currentIndex,
-        'loopMode': _loopMode.name,
-        'shuffle': _isShuffle,
-        'positionMs': _player.position.inMilliseconds,
-        'wasPlaying': _player.playing && !_userPaused,
-      };
-      await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
-    } catch (e) {
-      debugPrint('Playback queue persist failed: $e');
-    }
+    // Multiple state changes can request an immediate save in quick
+    // succession (for example when starting a playlist). Serialize writes so
+    // an older snapshot can never finish after the newer one.
+    _persistOperation = _persistOperation.then((_) async {
+      try {
+        final map = {
+          'queue': _playlist.map((t) => t.toMap()).toList(),
+          'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
+          'currentIndex': _currentIndex,
+          'loopMode': _loopMode.name,
+          'shuffle': _isShuffle,
+          'positionMs': _player.position.inMilliseconds,
+          'wasPlaying': _player.playing && !_userPaused,
+        };
+        await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
+      } catch (e) {
+        debugPrint('Playback queue persist failed: $e');
+      }
+    });
+    return _persistOperation;
   }
 
   void _emitQueue() {
@@ -284,12 +297,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     });
 
     _player.playerStateStream.listen((state) {
-      _isPlaying = state.playing;
-      if (state.playing) _userPaused = false;
+      _isPlaying = state.playing &&
+          state.processingState != ja.ProcessingState.completed;
       _playerStateController.add(_isPlaying);
       _broadcastState();
 
-      if (state.processingState == ja.ProcessingState.completed) {
+      if (state.playing &&
+          state.processingState == ja.ProcessingState.completed) {
         _handleQueueCompleted();
       }
     });
@@ -403,7 +417,6 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         ..clear()
         ..addAll(newQueue);
       _emitQueue();
-      _schedulePersist(immediate: true);
     }
     if (!_playlist.any((t) => t.id == track.id)) {
       _playlist.insert(0, track);
@@ -427,6 +440,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() async {
+    _userPaused = false;
     // Cold restore: we have a logical track but an empty native queue.
     if (_queueSource.length == 0 && currentTrack != null) {
       final resumePosition = _resumePosition;
@@ -440,12 +454,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     // Nothing loaded at all: playing would be a lie the UI then renders as
     // a paused-state toggle for silence. Stand down instead.
     if (_queueSource.length == 0) return;
-    _userPaused = false;
     if (_audioSession != null) await _audioSession!.setActive(true);
-    await _player.play();
-    _isPlaying = true;
-    _playerStateController.add(true);
-    _broadcastState();
+    if (_player.processingState == ja.ProcessingState.completed) {
+      await _player.seek(Duration.zero);
+    }
+    _requestPlay();
   }
 
   @override
@@ -505,10 +518,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_playlist.isEmpty) return;
 
     // Standard music UX: restart the current track once we're >3s in.
-    if (_player.position > const Duration(seconds: 3)) {
-      await seek(Duration.zero);
-      return;
-    }
+    ///if (_player.position > const Duration(seconds: 3)) {
+    ///  await seek(Duration.zero);
+    ///  return;
+    ///}
 
     final prev = _queueManager.previous(
       queue: _playlist,
@@ -666,7 +679,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     ++_startToken;
     _isRebuilding = true;
     try {
-      final path = await AudioDownloadService.ensureDownloaded(active);
+      final path = await _ensureDownloaded(active);
       await _queueSource.clear();
       await _queueSource.add(ja.AudioSource.file(path, tag: active));
       _queueBaseIndex = _currentIndex;
@@ -675,7 +688,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         initialIndex: 0,
         initialPosition: position,
       );
-      if (wasPlaying) await _player.play();
+      if (wasPlaying && !_userPaused) _requestPlay();
     } catch (e) {
       debugPrint('rebuild queue failed: $e');
     } finally {
@@ -690,6 +703,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// target is already the prefetched next item (so the transition is gapless).
   Future<void> _playAtIndex(int index) async {
     if (index < 0 || index >= _playlist.length) return;
+    _userPaused = false;
     final playerIndex = index - _queueBaseIndex;
     if (playerIndex >= 0 && playerIndex < _queueSource.length) {
       _currentIndex = index;
@@ -703,7 +717,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // clear just_audio's completed/playWhenReady state. Explicit navigation
       // must actively start the selected child, otherwise the UI advances
       // while the old audio remains at (or restarts from) its end position.
-      await _player.play();
+      _requestPlay();
       // currentIndexStream is asynchronous and can be suppressed by a
       // just_audio implementation when seeking to an already queued item.
       // Reconcile after the seek as well, so the UI cannot remain on the
@@ -806,7 +820,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       }
 
-      final path = await AudioDownloadService.ensureDownloaded(track);
+      final path = await _ensureDownloaded(track);
       // The current track may have been changed by another user action while
       // the download was running. Do not insert into a different queue.
       if (_currentIndex < 0 ||
@@ -857,6 +871,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   // Internals
   // ---------------------------------------------------------------------------
 
+  /// play() completes at pause/stop/end, not when audio starts. Waiting for it
+  /// inside a queue transaction keeps _isRebuilding set for the entire song,
+  /// swallowing completion and delaying prefetch. State comes from the player
+  /// stream, never from completion of this long-lived future.
+  void _requestPlay() {
+    unawaited(_player.play().catchError((Object error, StackTrace stackTrace) {
+      debugPrint('Playback request failed: $error');
+      _broadcastState();
+    }));
+  }
+
   /// Drops every queued item after the one the player is currently on, so the
   /// prefetch window can be rebuilt without interrupting playback.
   Future<void> _trimQueueAfterCurrent() async {
@@ -889,7 +914,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       if (autoplay && _audioSession != null) {
         await _audioSession!.setActive(true);
       }
-      path = await AudioDownloadService.ensureDownloaded(active);
+      path = await _ensureDownloaded(active);
     } catch (e) {
       debugPrint('playTrack download failed: $e');
       if (token == _startToken) {
@@ -934,10 +959,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         initialPosition: initialPosition ?? Duration.zero,
       );
 
-      if (autoplay && token == _startToken) {
-        await _player.play();
-        _isPlaying = true;
-        _playerStateController.add(true);
+      if (autoplay && !_userPaused && token == _startToken) {
+        _requestPlay();
       }
     } catch (e) {
       debugPrint('startCurrent error: $e');
@@ -964,14 +987,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       final position = _player.position;
       final active = currentTrack;
       if (active == null) return;
-      final path = await AudioDownloadService.ensureDownloaded(active);
+      final path = await _ensureDownloaded(active);
       await _queueSource.clear();
       await _queueSource.add(ja.AudioSource.file(path, tag: active));
       _queueBaseIndex = _currentIndex;
       await _player.setAudioSource(_queueSource, initialIndex: 0, initialPosition: position);
-      await _player.play();
-      _isPlaying = true;
-      _playerStateController.add(true);
+      if (!_userPaused) _requestPlay();
       _broadcastState();
     } catch (e) {
       debugPrint('Playback recovery failed: $e');
@@ -1007,12 +1028,16 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _prefetchingId = next.id;
     try {
-      final path = await AudioDownloadService.ensureDownloaded(next);
+      final path = await _ensureDownloaded(next);
       // Re-validate after the download: the user may have navigated, or the
       // playlist may have been replaced while we were fetching — the index
       // guard alone can pass for a *new* window and append a stale track.
       final succIndex = _currentIndex + 1;
-      if (_currentIndex == _queueBaseIndex + _queueSource.length - 1 &&
+      if (!_isRebuilding &&
+          !autoAdvanceHeld &&
+          _loopMode != LoopMode.one &&
+          !_isShuffle &&
+          _currentIndex == _queueBaseIndex + _queueSource.length - 1 &&
           succIndex < _playlist.length &&
           _playlist[succIndex].id == next.id) {
         await _queueSource.add(ja.AudioSource.file(path, tag: next));
@@ -1027,7 +1052,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// The native queue ran out. Advance the logical playlist (the prefetch of
   /// the following track may simply not have finished in time).
   void _handleQueueCompleted() {
-    if (_isRebuilding || _playlist.isEmpty) return;
+    if (_isRebuilding || _userPaused || _playlist.isEmpty) return;
 
     // The user is on the lyrics / info surface: end here rather than pulling
     // the ground out from under them by loading another track.
@@ -1061,7 +1086,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     Duration? positionOverride,
     Duration? bufferedPositionOverride,
   }) {
-    final playing = _player.playing;
+    final playing = _player.playing &&
+        _player.processingState != ja.ProcessingState.completed;
     final mapped = const {
       ja.ProcessingState.idle: AudioProcessingState.idle,
       ja.ProcessingState.loading: AudioProcessingState.loading,
