@@ -1,0 +1,107 @@
+plugins {
+    id "com.android.application"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+// Release signing. Credentials live in android/key.properties, which is
+// gitignored and never committed — see tool/make_keystore.sh.
+//
+// When the file is absent (fresh clone, CI without secrets) the build falls
+// back to the debug key so `flutter run --release` still works, and prints a
+// warning so an unsigned-for-real build is never shipped by accident.
+def keystorePropertiesFile = rootProject.file("key.properties")
+def hasReleaseKey = keystorePropertiesFile.exists()
+def keystoreProperties = new Properties()
+if (hasReleaseKey) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+android {
+    namespace = "com.bilibeat.bilibeat"
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId = "com.bilibeat.bilibeat"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                // rootProject.file, not file: inside the app module `file()`
+                // resolves against android/app/, but key.properties and the
+                // keystore both live in android/.
+                storeFile = rootProject.file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = hasReleaseKey
+                ? signingConfigs.release
+                : signingConfigs.debug
+            if (!hasReleaseKey) {
+                logger.warn("WARNING: android/key.properties not found — " +
+                        "signing this release with the DEBUG key. " +
+                        "Run tool/make_keystore.sh before publishing.")
+            }
+
+            // Release optimizations: R8 minification + resource shrinking for a
+            // smaller binary and faster startup.
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+}
+
+// 64-bit only, permanently — release builds ship arm64-v8a and nothing else.
+//
+// `ndk { abiFilters "arm64-v8a" }` is NOT enough on its own: it does not strip
+// prebuilt .so files that arrive inside plugin AARs. The `jni` package ships
+// libdartjni.so for every ABI, and its presence alone made the APK advertise
+// `native-code: 'arm64-v8a' 'armeabi-v7a' 'x86_64'` — so a 32-bit device would
+// have installed it and then crashed on launch, because libflutter.so and
+// libapp.so were arm64-only. Excluding at packaging time is what actually
+// removes them.
+//
+// Scoped to the release variant on purpose: applying it to `debug` too would
+// break x86_64 emulators.
+//
+// This does not make the app faster — the arm64 binary was always arm64-only.
+// It buys one artifact instead of three, and a shorter build.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.add("**/armeabi-v7a/**")
+        variant.packaging.jniLibs.excludes.add("**/armeabi/**")
+        variant.packaging.jniLibs.excludes.add("**/x86/**")
+        variant.packaging.jniLibs.excludes.add("**/x86_64/**")
+    }
+}
+
+flutter {
+    source = "../.."
+}
