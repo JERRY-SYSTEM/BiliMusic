@@ -1,0 +1,237 @@
+name: iOS Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_env:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Version Number
+        id: generate_version
+        run: |
+          if [[ ${{ github.ref }} == refs/tags/* ]]; then
+            TAG_VERSION=$(echo ${{ github.ref }} | sed -E 's/^refs\/tags\/(v)?//')
+            echo "This is a tag release: $TAG_VERSION"
+
+          elif [[ ${{ github.ref }} == refs/heads/* ]]; then
+            TAG_VERSION=$(echo ${{ github.ref }} | sed -E 's/^refs\/heads\///' | sed 's/\//-/g')
+            echo "This is a branch push: $TAG_VERSION"
+
+          elif [[ ${{ github.ref }} == refs/pull/* ]]; then
+            PR_NUMBER=$(echo ${{ github.ref }} | sed -E 's/^refs\/pull\/([0-9]+)\/merge$/\1/')
+            TAG_VERSION="pr-$PR_NUMBER"
+            echo "This is a Pull Request: $TAG_VERSION"
+
+          else
+            TAG_VERSION=$(echo ${{ github.ref }} | sed 's/\//-/g')
+            echo "This is another trigger: $TAG_VERSION"
+          fi
+
+          echo "TAG_VERSION=$TAG_VERSION"
+
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          SHORT_HASH=$(git rev-parse --short HEAD)
+          BUILD_VERSION="${COMMIT_COUNT}"
+
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> $GITHUB_OUTPUT
+          echo "Generated BUILD_VERSION: ${BUILD_VERSION}"
+        shell: bash
+
+      - name: Update version in pubspec.yaml
+        id: update_version_in_pubspec
+        run: |
+          MAIN_VERSION=$(grep "^version:" pubspec.yaml | sed -E 's/version: ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          echo "MAIN_VERSION=${MAIN_VERSION}"
+
+          FULL_VERSION="${MAIN_VERSION}+${{ steps.generate_version.outputs.BUILD_VERSION }}"
+          echo "FULL_VERSION=${FULL_VERSION}"
+
+          sed -i "s/^version: .*/version: ${FULL_VERSION}/" pubspec.yaml
+
+          echo "Updated pubspec.yaml content:"
+          cat pubspec.yaml
+
+          if grep -q "^version: ${FULL_VERSION}" pubspec.yaml; then
+            echo "Version updated successfully to ${FULL_VERSION}"
+          else
+            echo "Failed to update version"
+            echo "Current version line:"
+            grep "^version:" pubspec.yaml
+            exit 1
+          fi
+
+          echo "FULL_VERSION=${FULL_VERSION}" > _build_env.config
+        shell: bash
+
+      - name: Upload updated pubspec.yaml
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_env_files
+          path: |
+            pubspec.yaml
+            _build_env.config
+
+  build_app:
+    needs: build_env
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - name: ios-unsigned
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download updated pubspec.yaml
+        uses: actions/download-artifact@v4
+        with:
+          name: build_env_files
+
+      - name: Replace pubspec.yaml
+        run: |
+          ls
+          cat pubspec.yaml
+          pwd
+          cat _build_env.config
+        shell: bash
+
+      - name: Read FULL_VERSION from _build_env.config
+        id: read_build_env
+        run: |
+          echo "Reading version from _build_env.config..."
+          FULL_VERSION=$(grep 'FULL_VERSION=' _build_env.config | cut -d '=' -f2)
+          echo "FULL_VERSION=${FULL_VERSION}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Check Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS Unsigned
+        if: matrix.name == 'ios-unsigned'
+        run: |
+          echo "Generating Flutter/Xcode build configuration..."
+
+          flutter build ios \
+            --release \
+            --no-codesign \
+            --config-only
+
+          echo "Flutter configuration generated."
+
+          echo "Building Runner.app with xcodebuild without signing..."
+
+          cd ios
+
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          cd ..
+
+          echo "xcodebuild build completed."
+
+          echo "Searching generated Runner.app..."
+
+          RUNNER_APP=$(find build/ios ios/build -name "Runner.app" -type d | head -1)
+
+          if [ -z "$RUNNER_APP" ]; then
+            echo "Runner.app not found!"
+            find build ios/build -name "*.app" -type d || true
+            exit 1
+          fi
+
+          echo "Found Runner.app:"
+          echo "$RUNNER_APP"
+
+          mkdir -p Payload
+          rm -rf Payload/*
+
+          cp -R "$RUNNER_APP" Payload/Runner.app
+
+          echo "Runner.app copied to Payload."
+        shell: bash
+
+
+      - name: Compress Build
+        run: |
+          if [ "${{ matrix.name }}" = "ios-unsigned" ]; then
+
+            echo "Creating unsigned IPA..."
+
+            IPA_NAME="bilimusic_ios-unsigned-${{ steps.read_build_env.outputs.FULL_VERSION }}.ipa"
+
+            zip -r "$IPA_NAME" Payload
+
+            echo "Unsigned IPA created:"
+            ls -lh "$IPA_NAME"
+
+            echo "IPA contents:"
+            unzip -l "$IPA_NAME" | head -50
+
+          fi
+        shell: bash
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-artifact
+          path: |
+            *.ipa
+            *.zip
+          if-no-files-found: error
+
+  release:
+    needs: build_app
+    runs-on: ubuntu-latest
+  
+    permissions:
+      contents: write
+  
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+  
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+  
+      - name: Read FULL_VERSION from _build_env.config
+        id: read_build_env
+        run: |
+          echo "Reading version from _build_env.config..."
+          FULL_VERSION=$(grep 'FULL_VERSION=' artifacts/build_env_files/_build_env.config | cut -d '=' -f2)
+          echo "FULL_VERSION=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${FULL_VERSION}"
+        shell: bash
+  
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.read_build_env.outputs.FULL_VERSION }}
+          name: Release ${{ steps.read_build_env.outputs.FULL_VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.ipa
+            artifacts/**/*.zip
