@@ -29,11 +29,11 @@ class BiliAuthController extends ChangeNotifier {
   BiliQrSession? qrSession;
   BiliQrStatus status = BiliQrStatus.idle;
   String? message;
-  bool _initialized = false;
+  Future<void>? _initializeFuture;
 
-  Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+  Future<void> initialize() => _initializeFuture ??= _restoreSession();
+
+  Future<void> _restoreSession() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/$_sessionFile');
@@ -127,6 +127,25 @@ class BiliAuthController extends ChangeNotifier {
     session = null;
     status = BiliQrStatus.idle;
     await _deleteSaved();
+    notifyListeners();
+  }
+
+  /// Replaces the current persisted login with a session from a local backup.
+  ///
+  /// Validation happens before touching the existing session so a malformed
+  /// backup cannot accidentally log the user out. Cookie values are never
+  /// included in thrown errors or debug output.
+  Future<void> importSession(BiliSession imported) async {
+    if (!imported.isLoggedIn || imported.cookie.trim().isEmpty) {
+      throw const FormatException('备份中的登录信息不完整');
+    }
+    await initialize();
+    _cancelPolling();
+    session = imported;
+    status = BiliQrStatus.success;
+    qrSession = null;
+    message = null;
+    await _save();
     notifyListeners();
   }
 

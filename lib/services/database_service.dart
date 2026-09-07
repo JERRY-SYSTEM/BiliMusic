@@ -335,6 +335,80 @@ class DatabaseService {
     return List<Playlist>.from(_playlists);
   }
 
+  /// Returns only user-authored lyrics for tracks included in a backup.
+  static Future<Map<String, LyricsResult>> getManualLyrics(
+      Set<String> trackIds) async {
+    await _ensureLoaded();
+    return Map<String, LyricsResult>.fromEntries(_lyricsCache.entries.where(
+      (entry) => trackIds.contains(entry.key) && entry.value.isManual,
+    ));
+  }
+
+  /// Commits a fully prepared playlist snapshot and imported manual lyrics.
+  ///
+  /// Import orchestration builds the complete result in memory first, then
+  /// calls this once so large backups do not rewrite the database per track.
+  /// Existing network-provided lyrics remain intact; imported manual lyrics
+  /// replace entries for the same track id.
+  static Future<void> replacePlaylistsAndManualLyrics({
+    required List<Playlist> playlists,
+    required Map<String, LyricsResult> manualLyrics,
+    Map<String, Track> trackOverrides = const {},
+  }) async {
+    await _ensureLoaded();
+    final replacement = playlists
+        .map((playlist) => Playlist(
+              id: playlist.id,
+              name: playlist.name,
+              coverUrl: playlist.coverUrl,
+              remoteId: playlist.remoteId,
+              isOnline: playlist.isOnline,
+              lastSyncedAt: playlist.lastSyncedAt,
+              tracks: playlist.tracks,
+            ))
+        .toList();
+    if (!replacement.any((playlist) => playlist.id == Playlist.favoritesId)) {
+      replacement.insert(
+        0,
+        Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []),
+      );
+    }
+    _playlists
+      ..clear()
+      ..addAll(replacement);
+    _lyricsCache.addAll(manualLyrics);
+    await _persistLyrics();
+    var downloadedChanged = false;
+    for (var index = 0; index < _downloadedTracks.length; index++) {
+      final override = trackOverrides[_downloadedTracks[index].id];
+      if (override == null) continue;
+      _downloadedTracks[index] = _downloadedTracks[index].copyWith(
+        title: override.title,
+        uploader: override.uploader,
+      );
+      downloadedChanged = true;
+    }
+    if (downloadedChanged) await _persistDownloaded();
+    var historyChanged = false;
+    for (var index = 0; index < _recentlyPlayed.length; index++) {
+      final override = trackOverrides[_recentlyPlayed[index].id];
+      if (override == null) continue;
+      _recentlyPlayed[index] = _recentlyPlayed[index].copyWith(
+        title: override.title,
+        uploader: override.uploader,
+      );
+      historyChanged = true;
+    }
+    if (historyChanged) {
+      await _persistRecentlyPlayed();
+      if (!_historyUpdateController.isClosed) {
+        _historyUpdateController.add(null);
+      }
+    }
+    // Publish the library event after every affected in-memory store is ready.
+    await _persistPlaylists();
+  }
+
   static Future<Playlist> getFavoritesPlaylist() async {
     await _ensureLoaded();
     return _playlists.firstWhere(
