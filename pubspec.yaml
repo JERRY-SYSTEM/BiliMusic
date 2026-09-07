@@ -15,6 +15,7 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.7
   image_picker: ^1.2.3
+  file_picker: ^12.2.0
   qr_flutter: ^4.1.0
   hugeicons: ^1.1.7
 
