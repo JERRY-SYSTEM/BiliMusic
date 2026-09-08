@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -85,6 +86,24 @@ jobs:
         shell: bash
         run: cat _build_env.config >> "$GITHUB_ENV"
 
+      - name: Set up Java 21 for Android
+        if: matrix.name == 'android-arm64-v8a'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Check Java version
+        if: matrix.name == 'android-arm64-v8a'
+        run: java -version
+
+      - name: Set up Android SDK
+        if: matrix.name == 'android-arm64-v8a'
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'tools platform-tools build-tools;33.0.0'
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -95,6 +114,7 @@ jobs:
         run: flutter pub get
 
       - name: Build unsigned iOS app
+        id: build_ios
         if: matrix.name == 'ios-unsigned'
         shell: bash
         run: |
@@ -110,6 +130,14 @@ jobs:
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
           zip -r9 "bilibeat-${{ inputs.tag }}-ios-unsigned.ipa" Payload
 
+      # 构建失败时执行
+      - name: Trigger CI workflow
+        if: ${{ failure() && steps.build_ios.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run ci.yml --ref "${{ github.ref_name }}"
+
       - name: Build Android arm64-v8a APK
         if: matrix.name == 'android-arm64-v8a'
         shell: bash
@@ -121,26 +149,24 @@ jobs:
             --build-number "$BUILD_NUMBER" \
             --dart-define="APP_VERSION=$VERSION_NAME"
 
-      - name: Install Android build tools 33.0.0
+      - name: Check Android build tools 33.0.0
         if: matrix.name == 'android-arm64-v8a'
         shell: bash
-        run: |
-          yes | sdkmanager "build-tools;33.0.0" >/dev/null || true
-          test -x "$ANDROID_HOME/build-tools/33.0.0/apksigner"
+        run: test -x "$ANDROID_SDK_ROOT/build-tools/33.0.0/apksigner"
 
       - name: Sign Android APK
         if: matrix.name == 'android-arm64-v8a'
         shell: bash
         run: |
-          if [ ! -f android/sign.p12 ]; then
-            echo "android/sign.p12 is missing from the checked-out commit."
+          if [ ! -f .github/workflows/sign.p12 ]; then
+            echo ".github/workflows/sign.p12 is missing from the checked-out commit."
             exit 1
           fi
 
           mkdir -p build/artifacts
-          APKSIGNER="$ANDROID_HOME/build-tools/33.0.0/apksigner"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/33.0.0/apksigner"
           "$APKSIGNER" sign \
-            --ks android/sign.p12 \
+            --ks .github/workflows/sign.p12 \
             --ks-key-alias key0 \
             --ks-pass pass:123456 \
             --key-pass pass:123456 \
