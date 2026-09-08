@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 import '../widgets/cached_cover_image.dart';
-import 'audio_download_service.dart';
 
 /// A user-facing cache bucket. A bucket contains every cache artifact that can
 /// be confidently attributed to one song; everything else is [other].
@@ -61,19 +60,22 @@ class CacheInventory {
     }
     final coversDir = Directory('${support.path}/bilibeat_covers');
     if (await coversDir.exists()) {
-      for (final entity in await coversDir.list().toList()) {
-        if (entity is! File) continue;
-        Track? owner;
-        for (final track in tracks) {
-          if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
-          // Cover filenames are dimension-specific. Without a persisted
-          // ownership map, historical files remain safely in “其它”.
-          for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
-            final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
-            if (entity.path.contains(key)) { owner = track; break; }
-          }
-          if (owner != null) break;
+      // Hash each track/size once, not once per file in a growing cache.
+      final owners = <String, Track>{};
+      for (final track in tracks) {
+        if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
+        // Cover filenames are dimension-specific. Without a persisted
+        // ownership map, historical files remain safely in “其它”.
+        for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
+          final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
+          owners.putIfAbsent('img_$key.img', () => track);
         }
+        // Yield to UI events while indexing a large library.
+        await Future<void>.delayed(Duration.zero);
+      }
+      await for (final entity in coversDir.list()) {
+        if (entity is! File) continue;
+        final owner = owners[entity.uri.pathSegments.last];
         if (owner == null) {
           otherFiles.add(entity);
         } else {

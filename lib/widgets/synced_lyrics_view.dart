@@ -442,10 +442,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.touch_app_rounded, color: context.palette.accent, size: 15),
-          SizedBox(width: 7),
-          Text(
+          const SizedBox(width: 7),
+          const Text(
             '点击正在唱的那行歌词',
-            style: TextStyle(
+            style: const TextStyle(
               color: AppColors.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -543,9 +543,9 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.my_location_rounded, color: context.palette.accent, size: 15),
-            SizedBox(width: 6),
-            Text('回到当前',
-                style: TextStyle(
+            const SizedBox(width: 6),
+            const Text('回到当前',
+                style: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600)),

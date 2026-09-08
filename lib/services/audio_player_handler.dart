@@ -1009,6 +1009,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// queue's last child. This keeps the window gapless-ready without ever
   /// streaming bytes through Dart.
   Future<void> _prefetchNext() async {
+    // Completed children retain native AVPlayerItems and their file/decoder
+    // resources until removed. End this small window and let the existing
+    // completion path rebuild it; never accumulate the entire logical queue.
+    // Still download the successor when the window is full, so rebuilding
+    // at its end does not have to wait for the network.
     if (_loopMode == LoopMode.one || autoAdvanceHeld) return;
     if (_playlist.isEmpty || _currentIndex < 0) return;
 
@@ -1034,6 +1039,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // guard alone can pass for a *new* window and append a stale track.
       final succIndex = _currentIndex + 1;
       if (!_isRebuilding &&
+          _queueSource.length < 3 &&
           !autoAdvanceHeld &&
           _loopMode != LoopMode.one &&
           !_isShuffle &&

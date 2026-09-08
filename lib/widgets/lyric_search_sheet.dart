@@ -156,7 +156,7 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                   Expanded(
                     child: DropdownButtonFormField<LyricProvider>(
                     key: const Key('lyricProviderSelector'),
-                    value: _provider,
+                    initialValue: _provider,
                     decoration: InputDecoration(
                       labelText: '音乐源',
                       filled: true,

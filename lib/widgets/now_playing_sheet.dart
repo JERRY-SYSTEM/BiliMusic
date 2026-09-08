@@ -269,6 +269,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                   await DatabaseService.updateTrackMetadata(updated);
                   if (!mounted) return;
                   widget.handler.updateCurrentTrackMetadata(updated);
+                  if (!sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
                 },
               ),
@@ -570,7 +571,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 child: HugeIcon(
                   icon: icon,
                   color: context.palette.accent,
-                  size: 24,
                 ),
               ),
             ),
@@ -752,7 +752,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 const SizedBox(width: 8),
                 IconButton(
                   icon: HugeIcon(icon: HugeIcons.strokeRoundedEdit02,
-                      color: context.palette.textSecondary, size: 24),
+                      color: context.palette.textSecondary),
                   tooltip: '编辑',
                   onPressed: _openEditor,
                 ),
@@ -909,7 +909,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 BoxShadow(
                   color: context.palette.accent30,
                   blurRadius: 22,
-                  offset: Offset(0, 6),
+                  offset: const Offset(0, 6),
                 ),
               ]
             : null,
@@ -954,7 +954,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     return SizedBox(
       width: 48,
       child: IconButton(
-        icon: HugeIcon(icon: icon, color: context.palette.textMuted, size: 24),
+        icon: HugeIcon(icon: icon, color: context.palette.textMuted),
         tooltip: label,
         onPressed: () {
           Haptics.medium();

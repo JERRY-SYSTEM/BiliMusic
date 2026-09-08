@@ -140,7 +140,6 @@ class _AppTransferPageState extends State<AppTransferPage> {
         dialogTitle: '选择 BiliBeat 备份',
         type: FileType.custom,
         allowedExtensions: const ['json'],
-        allowMultiple: false,
       );
       if (result.isEmpty) return;
       final file = result.first;

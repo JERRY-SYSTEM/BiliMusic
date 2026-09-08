@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'bili_http.dart';
@@ -10,8 +9,6 @@ import 'bili_http.dart';
 /// B站搜索 API 强制要求 buvid3 Cookie 和 dm_img 风控参数，
 /// 缺少会导致搜索返回空结果 (-352 / 412)。
 class FingerprintService {
-  static final HttpClient _client = biliHttpClient();
-
   static String _buvid3 = '';
   static String _buvid4 = '';
   static DateTime? _cacheTime;
@@ -30,15 +27,13 @@ class FingerprintService {
     }
 
     try {
-      final req = await _client.getUrl(Uri.parse(_spiUrl));
-      req.headers.set('Referer', 'https://www.bilibili.com');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        throw Exception('fingerprint HTTP ${res.statusCode}');
-      }
-      final body = await res.transform(utf8.decoder).join();
+      final body = await withHttpResponse<String>(Uri.parse(_spiUrl), (res) async {
+        if (res.statusCode != 200) {
+          await res.drain<void>();
+          throw Exception('fingerprint HTTP ${res.statusCode}');
+        }
+        return res.transform(utf8.decoder).join();
+      }, headers: {'Referer': 'https://www.bilibili.com', 'User-Agent': kBiliUserAgent});
 
       final json = jsonDecode(body);
       if (json['code'] == 0 && json['data'] != null) {

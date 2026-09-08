@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-
 import '../models/bili_favorite_collection.dart';
 import '../models/bili_session.dart';
 import '../models/track.dart';
@@ -29,7 +27,6 @@ class BiliFavoritesService {
         // `list-all.cover` is not reliable: Bilibili may populate it with
         // the first video's cover instead of the collection's own cover.
         // The canonical cover is fetched from folder/info below.
-        coverUrl: null,
       );
     }).where((collection) => collection.id.isNotEmpty).toList();
     return Future.wait(collections.map((collection) async {
@@ -81,7 +78,7 @@ class BiliFavoritesService {
 
   static Future<Track?> _mapTrack(Map<String, dynamic> map) async {
     if ((map['type'] as num? ?? 2).toInt() != 2) return null;
-    var bvid = map['bvid'] as String? ?? map['bv_id'] as String? ?? '';
+    final bvid = map['bvid'] as String? ?? map['bv_id'] as String? ?? '';
     var title = map['title'] as String? ?? '';
     var cover = _normalizeCoverUrl(map['cover'] as String?) ?? '';
     final upper = map['upper'] is Map ? Map<String, dynamic>.from(map['upper'] as Map) : const <String, dynamic>{};

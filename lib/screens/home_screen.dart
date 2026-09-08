@@ -269,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 BoxShadow(
                     color: palette.accent.withValues(alpha: .30),
                     blurRadius: 10,
-                    offset: Offset(0, 3)),
+                    offset: const Offset(0, 3)),
               ],
             ),
             child: Icon(Icons.play_arrow_rounded,
@@ -516,7 +516,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
 
-        SliverPadding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 12), sliver: const SliverToBoxAdapter(child: Text('本地歌单', style: AppTypography.title))),
+        const SliverPadding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 12), sliver: const SliverToBoxAdapter(child: Text('本地歌单', style: AppTypography.title))),
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           sliver: SliverList.builder(itemCount: localPlaylists.length, itemBuilder: (context, index) => _playlistBar(localPlaylists[index])),

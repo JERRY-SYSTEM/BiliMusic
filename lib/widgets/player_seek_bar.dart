@@ -40,7 +40,7 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
     final timeStyle = TextStyle(
       color: context.palette.textMuted,
       fontSize: 12,
-      fontFeatures: [FontFeature.tabularFigures()],
+      fontFeatures: const [FontFeature.tabularFigures()],
     );
     return AnimatedBuilder(
       animation:
