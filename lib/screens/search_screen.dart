@@ -364,22 +364,22 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
     if (reachedEnd && hasContent) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 22),
         child: Center(
           child: Text('没有更多了',
-              style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
+              style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
         ),
       );
     }
     if (hasContent) {
       final loadFailed = _hasSearched ? _searchLoadFailed : _recLoadFailed;
       if (loadFailed) {
-        return const Padding(
+        return Padding(
           padding: EdgeInsets.symmetric(vertical: 22),
           child: Center(
             child: Text('加载失败，上滑重试',
-                style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
+                style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
           ),
         );
       }
@@ -433,18 +433,18 @@ class _SearchScreenState extends State<SearchScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+              Icon(Icons.search, color: context.palette.textMuted, size: 20),
               const SizedBox(width: 10),
               Expanded(
                 child: TextField(
                   controller: _searchController,
                   focusNode: _focusNode,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+                  style: TextStyle(color: context.palette.textPrimary, fontSize: 14),
                   onSubmitted: _performSearch,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     isCollapsed: true,
                     hintText: '搜索歌曲、BV 号或链接',
-                    hintStyle: TextStyle(color: AppColors.textFaint, fontSize: 14),
+                    hintStyle: TextStyle(color: context.palette.textFaint, fontSize: 14),
                     border: InputBorder.none,
                   ),
                 ),
@@ -455,7 +455,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   // resets search pagination, so a later scroll cannot re-fetch
                   // the old query's next page.
                   onTap: _showRecommendations,
-                  child: const Icon(Icons.clear, color: AppColors.textMuted, size: 18),
+                  child: Icon(Icons.clear, color: context.palette.textMuted, size: 18),
                 ),
             ],
           ),
@@ -467,14 +467,14 @@ class _SearchScreenState extends State<SearchScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 '历史搜索',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.palette.textMuted, fontSize: 13, fontWeight: FontWeight.bold),
               ),
               if (_searchHistory.isNotEmpty)
                 GestureDetector(
                   onTap: _clearSearchHistory,
-                  child: const Text('清空历史', style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
+                  child: Text('清空历史', style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
                 ),
             ],
           ),
@@ -484,8 +484,8 @@ class _SearchScreenState extends State<SearchScreen> {
             runSpacing: 8,
             children: _searchHistory.map((tag) {
               return ActionChip(
-                label: Text(tag, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                backgroundColor: AppColors.white10,
+                label: Text(tag, style: TextStyle(color: context.palette.textSecondary, fontSize: 12)),
+                backgroundColor: context.palette.surfaceCard,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 onPressed: () {
                   _searchController.text = tag;
@@ -516,11 +516,11 @@ class _SearchScreenState extends State<SearchScreen> {
             children: [
               Text(
                 '${_searchResults.length} 个结果',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 14, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.palette.textSecondary, fontSize: 14, fontWeight: FontWeight.bold),
               ),
               TextButton(
                 onPressed: _showRecommendations,
-                child: const Text('清空搜索', style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
+                child: Text('清空搜索', style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
               ),
             ],
           ),
@@ -532,16 +532,16 @@ class _SearchScreenState extends State<SearchScreen> {
             padding: const EdgeInsets.symmetric(vertical: 40),
             child: Column(
               children: [
-                const Icon(Icons.search_off_rounded, size: 48, color: AppColors.textMuted),
+                Icon(Icons.search_off_rounded, size: 48, color: context.palette.textMuted),
                 const SizedBox(height: 12),
                 Text(
                   '未找到「$_lastQuery」',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                  style: TextStyle(color: context.palette.textSecondary, fontSize: 14),
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   '试试 BV 号，或更简短的关键词',
-                  style: TextStyle(color: AppColors.textFaint, fontSize: 12),
+                  style: TextStyle(color: context.palette.textFaint, fontSize: 12),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
@@ -572,7 +572,7 @@ class _SearchScreenState extends State<SearchScreen> {
               SizedBox(width: 8),
               Text(
                 '推荐',
-                style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.palette.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -619,8 +619,8 @@ class _SearchScreenState extends State<SearchScreen> {
                       RepaintBoundary(
                         child: MarqueeText(
                           text: track.title,
-                          style: const TextStyle(
-                            color: AppColors.textPrimary,
+                          style: TextStyle(
+                            color: context.palette.textPrimary,
                             fontSize: 15,
                             height: 1.3,
                             fontWeight: FontWeight.w600,
@@ -633,7 +633,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       const SizedBox(height: 4),
                       Text(
                         '${track.uploader} • ${formatDuration(Duration(seconds: track.duration))}',
-                        style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                        style: TextStyle(color: context.palette.textMuted, fontSize: 13),
                       ),
                     ],
                   ),
@@ -657,7 +657,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
                 // Plus Sign Button (+) to Add to Playlist
                 IconButton(
-                  icon: const Icon(Icons.add, color: AppColors.textSecondary, size: 22),
+                  icon: Icon(Icons.add, color: context.palette.textSecondary, size: 22),
                   tooltip: '添加至歌单',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 40, minHeight: 40),

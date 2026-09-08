@@ -195,6 +195,7 @@ class AppTypography {
 class AppTheme {
   static ThemeData build(ThemeMode mode, Color accent) {
     final brightness = mode == ThemeMode.light ? Brightness.light : Brightness.dark;
+    final palette = AppPalette.from(mode, accent);
     final base = ThemeData(
       brightness: brightness,
       scaffoldBackgroundColor: brightness == Brightness.dark ? AppColors.background : const Color(0xFFF7F7F9),
@@ -203,12 +204,16 @@ class AppTheme {
       splashFactory: InkSparkle.splashFactory,
     );
     return base.copyWith(
-      extensions: [AppPalette.from(mode, accent)],
+      extensions: [palette],
       textTheme: base.textTheme.copyWith(
-        displayLarge: AppTypography.display, displayMedium: AppTypography.titleLarge,
-        titleLarge: AppTypography.title, titleMedium: AppTypography.headline,
-        bodyLarge: AppTypography.body, bodyMedium: AppTypography.bodyMedium,
-        bodySmall: AppTypography.caption, labelSmall: AppTypography.overline,
+        displayLarge: AppTypography.display.copyWith(color: palette.textPrimary),
+        displayMedium: AppTypography.titleLarge.copyWith(color: palette.textPrimary),
+        titleLarge: AppTypography.title.copyWith(color: palette.textPrimary),
+        titleMedium: AppTypography.headline.copyWith(color: palette.textPrimary),
+        bodyLarge: AppTypography.body.copyWith(color: palette.textPrimary),
+        bodyMedium: AppTypography.bodyMedium.copyWith(color: palette.textPrimary),
+        bodySmall: AppTypography.caption.copyWith(color: palette.textSecondary),
+        labelSmall: AppTypography.overline.copyWith(color: palette.textSecondary),
       ),
       sliderTheme: SliderThemeData(activeTrackColor: accent, thumbColor: accent, overlayColor: accent.withValues(alpha: .14)),
     );

@@ -11,6 +11,12 @@ void main() {
     expect(palette.accent, accent);
     expect(palette.background, const Color(0xFFF7F7F9));
     expect(palette.textPrimary, isNot(AppColors.textPrimary));
+    expect(palette.textPrimary, const Color(0xFF15151A));
+    expect(palette.textSecondary, const Color(0xB315151A));
+    expect(palette.textMuted, const Color(0x9915151A));
+    expect(palette.textFaint, const Color(0x5915151A));
+    expect(palette.surfaceDeep, const Color(0xFFEDEDF2));
+    expect(palette.backgroundElevated, Colors.white);
   });
 
   test('default dark palette preserves the existing visual baseline', () {

@@ -7,11 +7,13 @@ import 'package:bilibeat/services/lyrics_engine.dart';
 import 'package:bilibeat/services/recommendation_engine.dart';
 import 'package:bilibeat/models/playlist.dart';
 import 'package:bilibeat/models/track.dart';
+import 'package:bilibeat/theme/app_theme.dart';
 import 'package:bilibeat/widgets/marquee_text.dart';
 import 'package:bilibeat/widgets/expand_from_card.dart';
 import 'package:bilibeat/widgets/mini_player.dart';
 import 'package:bilibeat/widgets/synced_lyrics_view.dart';
 import 'package:bilibeat/widgets/playlist_detail_sheet.dart';
+import 'package:bilibeat/widgets/cached_cover_image.dart';
 
 const _style = TextStyle(fontSize: 14, height: 1.25);
 
@@ -388,6 +390,7 @@ void main() {
       bool calibrating = false,
       void Function(double)? onCalibrateTap,
       bool autoFollow = true,
+      bool showTranslation = true,
       double offset = 0.0,
     }) {
       return MaterialApp(
@@ -402,6 +405,7 @@ void main() {
               calibrating: calibrating,
               onCalibrateTap: onCalibrateTap,
               autoFollow: autoFollow,
+              showTranslation: showTranslation,
               offset: offset,
             ),
           ),
@@ -417,6 +421,17 @@ void main() {
       expect(find.text('暂无同步歌词'), findsOneWidget);
       await tester.tap(find.text('搜索或粘贴歌词'));
       expect(opened, isTrue);
+    });
+
+    testWidgets('translation can be hidden without removing the main lyric',
+        (tester) async {
+      final data = [
+        LyricLine(time: 0, text: '原文', translation: '译文'),
+      ];
+      await tester.pumpWidget(host(data: data, showTranslation: false));
+
+      expect(find.text('原文'), findsOneWidget);
+      expect(find.text('译文'), findsNothing);
     });
 
     testWidgets('tapping a line seeks to its timestamp when not calibrating',
@@ -451,6 +466,22 @@ void main() {
       await tester.tap(find.text('回到当前'));
       await tester.pumpAndSettle();
       expect(find.text('回到当前'), findsNothing);
+    });
+
+    testWidgets('dragging lyrics exposes a selected time and seeks on play',
+        (tester) async {
+      double? sought;
+      await tester.pumpWidget(host(data: lines(), onSeek: (value) => sought = value));
+      await tester.pump();
+
+      await tester.drag(find.byType(ListView), const Offset(0, -220));
+      await tester.pump();
+      expect(find.byKey(const Key('lyricSelectionPlayButton')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('lyricSelectionPlayButton')));
+      await tester.pump();
+      expect(sought, isNotNull);
+      expect(sought, greaterThan(0));
     });
 
     testWidgets('armed, tapping a line reports tap calibration offset',
@@ -674,5 +705,49 @@ void main() {
       expect(find.text('在搜索页点 + 添加'), findsNothing);
       expect(find.byIcon(Icons.image_outlined), findsOneWidget);
     });
+
+    testWidgets('default artwork uses light theme surfaces', (tester) async {
+      final theme = AppTheme.build(ThemeMode.light, AppColors.accent);
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        home: Scaffold(
+          body: PlaylistDetailSheet(
+            playlist: Playlist(id: 'test_pl', name: '浅色歌单', tracks: []),
+            onSelectTrack: (_, {queue}) {},
+          ),
+        ),
+      ));
+
+      final artwork = tester.widget<DecoratedBox>(
+        find.byKey(const Key('playlistDefaultArtwork')),
+      );
+      final decoration = artwork.decoration as BoxDecoration;
+      final gradient = decoration.gradient as LinearGradient;
+      final palette = theme.extension<AppPalette>()!;
+      expect(gradient.colors, [
+        palette.surfaceDeep,
+        palette.backgroundElevated,
+      ]);
+    });
+  });
+
+  testWidgets('failed cover fallback follows the light palette',
+      (tester) async {
+    final theme = AppTheme.build(ThemeMode.light, AppColors.accent);
+    await tester.pumpWidget(MaterialApp(
+      theme: theme,
+      home: const Scaffold(
+        body: CachedCoverImage(url: '', width: 80, height: 80),
+      ),
+    ));
+    await tester.pump();
+
+    final fallback = tester.widget<Container>(
+      find.byKey(const Key('coverFallback')),
+    );
+    final decoration = fallback.decoration as BoxDecoration;
+    final gradient = decoration.gradient as LinearGradient;
+    final palette = theme.extension<AppPalette>()!;
+    expect(gradient.colors.last, palette.surfaceDeep);
   });
 }
