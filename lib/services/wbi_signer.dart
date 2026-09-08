@@ -1,11 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'bili_http.dart';
 
 class WbiSigner {
-  static final HttpClient _client = biliHttpClient();
 
   static final RegExp _stripChars = RegExp(r"[!'()*]");
 
@@ -56,13 +54,16 @@ class WbiSigner {
     }
 
     try {
-      final req = await _client.getUrl(Uri.parse('https://api.bilibili.com/x/web-interface/nav'));
-      req.headers.set('User-Agent',
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      final res = await req.close();
-      if (res.statusCode == 200) {
-        final body = await res.transform(utf8.decoder).join();
+      final body = await withHttpResponse<String?>(
+        Uri.parse('https://api.bilibili.com/x/web-interface/nav'),
+        (res) async {
+          if (res.statusCode == 200) return res.transform(utf8.decoder).join();
+          await res.drain<void>();
+          return null;
+        },
+        headers: {'User-Agent': kBiliUserAgent, 'Referer': 'https://www.bilibili.com/'},
+      );
+      if (body != null) {
         final json = jsonDecode(body);
         final wbiImg = json['data']?['wbi_img'];
         if (wbiImg != null) {

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/lyric_line.dart';
 import 'bili_http.dart';
@@ -14,7 +13,6 @@ class _ArtistResolution {
 }
 
 class LyricsEngine {
-  static final HttpClient _client = biliHttpClient();
   static final Map<String, Future<String?>> _neteasePictureCache = {};
 
   static String? _normalizePictureUrl(Object? value) {
@@ -26,30 +24,34 @@ class LyricsEngine {
 
   static Future<String?> _fetchNetEasePictureUrl(String id) {
     return _neteasePictureCache.putIfAbsent(id, () async {
-      final body = await _httpGet(
-        'https://music.163.com/api/song/detail?ids=%5B${Uri.encodeComponent(id)}%5D',
-        headers: const {'Referer': 'https://music.163.com'},
-      );
-      if (body == null) return null;
-      final songs = jsonDecode(body)['songs'] as List? ?? const [];
-      if (songs.isEmpty || songs.first is! Map) return null;
-      final album = (songs.first as Map)['album'];
-      return _normalizePictureUrl(album is Map ? album['picUrl'] : null);
+      try {
+        final body = await _httpGet(
+          'https://music.163.com/api/song/detail?ids=%5B${Uri.encodeComponent(id)}%5D',
+          headers: const {'Referer': 'https://music.163.com'},
+        );
+        if (body == null) return null;
+        final songs = jsonDecode(body)['songs'] as List? ?? const [];
+        if (songs.isEmpty || songs.first is! Map) return null;
+        final album = (songs.first as Map)['album'];
+        return _normalizePictureUrl(album is Map ? album['picUrl'] : null);
+      } catch (_) {
+        return null; // Optional artwork must not discard valid search results.
+      } finally {
+        // Only deduplicate in-flight lookups; failures must be retryable.
+        _neteasePictureCache.remove(id);
+      }
     });
   }
 
   static Future<String?> _httpGet(String urlStr, {Map<String, String>? headers}) async {
     try {
-      final req = await _client.getUrl(Uri.parse(urlStr));
-      headers?.forEach((k, v) => req.headers.set(k, v));
-      final res = await req.close();
-      if (res.statusCode == 200) {
-        return await res.transform(utf8.decoder).join();
-      }
-      // Drain non-200 bodies so the connection returns to the pool; with
-      // maxConnectionsPerHost = 4, a few un-drained 4xx/5xx responses would
-      // exhaust it and later requests would queue behind idleTimeout.
-      await res.drain<void>();
+      return await withHttpResponse<String?>(Uri.parse(urlStr), (res) async {
+        if (res.statusCode == 200) {
+          return await res.transform(utf8.decoder).join();
+        }
+        await res.drain<void>();
+        return null;
+      }, headers: headers ?? const {});
     } catch (e) {
       debugPrint('Lyrics HTTP error: $e');
     }

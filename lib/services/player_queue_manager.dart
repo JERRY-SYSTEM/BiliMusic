@@ -24,6 +24,9 @@ class PlayerQueueManager {
     _sync(queue, index);
     if (_history.isEmpty || _history.last != queue[index].id) {
       _history.add(queue[index].id);
+      if (_history.length > 200) {
+        _history.removeRange(0, _history.length - 200);
+      }
     }
   }
 

@@ -106,6 +106,8 @@ void main() async {
       androidNotificationChannelId: 'com.bilibeat.channel.audio',
       androidNotificationChannelName: 'BiliBeat',
       androidNotificationOngoing: true,
+      artDownscaleWidth: 512,
+      artDownscaleHeight: 512,
     ),
   );
   await _audioHandlerInstance!.restorePersistedQueue();

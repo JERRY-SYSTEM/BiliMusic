@@ -15,8 +15,8 @@ import '../theme/motion.dart';
 ///  * Requests a size-matched thumbnail from Bilibili's image CDN (which
 ///    supports `@{w}w_{h}h` resizing) instead of the full-resolution original,
 ///    cutting download bytes and decode cost dramatically in long lists.
-///  * Uses one shared [HttpClient] so connections are pooled and reused rather
-///    than spawning (and leaking) a new client per image.
+///  * Bounds network work and closes each request's client on completion or
+///    timeout, including when a background connection stops responding.
 ///  * Never touches the filesystem synchronously during `build` — that used to
 ///    put a blocking `existsSync` on the raster path for every local cover.
 class CachedCoverImage extends StatefulWidget {
@@ -60,17 +60,13 @@ class CachedCoverImage extends StatefulWidget {
 
 enum _CoverStatus { loading, ready, failed }
 
-class _CachedCoverImageState extends State<CachedCoverImage> {
-  static final HttpClient _client =
-      biliHttpClient(connectionTimeout: const Duration(seconds: 15),
-          maxConnectionsPerHost: 8);
-
+class _CachedCoverImageState extends State<CachedCoverImage>
+    with WidgetsBindingObserver {
   // Avoid requesting absurdly large thumbnails.
   static const int _maxEdge = 1080;
 
-  // Deduplicates concurrent downloads of the same URL: two list rows showing
-  // the same cover would otherwise both write to the same `.part` file and
-  // interleave truncate/append, renaming a corrupt file into the cache.
+  // Deduplicate concurrent downloads; temporary files are also unique so a
+  // timed-out writer cannot delete a retry's temporary file during cleanup.
   static final Map<String, Future<File?>> _inFlight = {};
 
   File? _file;
@@ -81,7 +77,21 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadKey = widget.url;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _status == _CoverStatus.failed) {
+      _loadImage();
+    }
   }
 
   @override
@@ -182,37 +192,36 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   /// kill mid-write can never leave a truncated file cached forever.
   static Future<File?> _downloadAndCache(String fetchUrl, File file) async {
     try {
-      final req = await _client.getUrl(Uri.parse(fetchUrl));
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
-
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        return null;
-      }
-
-      final part = File('${file.path}.part');
-      try {
-        final sink = part.openWrite();
-        try {
-          await res.pipe(sink);
-        } finally {
-          await sink.close();
-        }
-        if (await part.length() == 0) {
+      return await withHttpResponse<File?>(Uri.parse(fetchUrl), (res) async {
+        if (res.statusCode != 200) {
+          await res.drain<void>();
           return null;
         }
-        await part.rename(file.path);
-        return file;
-      } finally {
-        // A failed download must not leave a `.part` file in temp forever.
-        if (await part.exists()) {
+
+        final part = File('${file.path}.${DateTime.now().microsecondsSinceEpoch}.part');
+        try {
+          final sink = part.openWrite();
           try {
-            await part.delete();
-          } catch (_) {}
+            await res.pipe(sink);
+          } finally {
+            await sink.close();
+          }
+          if (await part.length() == 0) {
+            return null;
+          }
+          await part.rename(file.path);
+          return file;
+        } finally {
+          if (await part.exists()) {
+            try {
+              await part.delete();
+            } catch (_) {}
+          }
         }
-      }
+      }, headers: {
+        'Referer': 'https://www.bilibili.com/',
+        'User-Agent': kBiliUserAgent,
+      });
     } catch (_) {
       return null;
     }
@@ -228,8 +237,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
     // usual case: ResizeImage never upscales, so the decode is still capped at
     // the source, and CDN thumbnails already arrive at the requested square.
     const headroom = 16 / 9;
-    final cacheW = (widget.width * dpr * headroom).round();
-    final cacheH = (widget.height * dpr * headroom).round();
+    final cacheW = (widget.width * dpr * headroom).round().clamp(1, _maxEdge);
+    final cacheH = (widget.height * dpr * headroom).round().clamp(1, _maxEdge);
 
     late final Widget child;
     switch (_status) {

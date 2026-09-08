@@ -20,6 +20,7 @@ const second = Track(
 /// The fake does not attach sources to a platform, so queue edits stay local.
 class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   final states = StreamController<ja.PlayerState>.broadcast();
+  final indices = StreamController<int?>.broadcast();
   Completer<void>? playback;
   ja.AudioSource? source;
 
@@ -42,7 +43,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
   @override
-  Stream<int?> get currentIndexStream => const Stream.empty();
+  Stream<int?> get currentIndexStream => indices.stream;
   @override
   Stream<ja.PlayerException> get errorStream => const Stream.empty();
 
@@ -107,6 +108,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Future<void> dispose() async {
     finishPlayFuture();
     await states.close();
+    await indices.close();
   }
 }
 
@@ -139,6 +141,30 @@ void main() {
     await handler.clearQueue();
     await handler.persistPlaybackState();
     await player.dispose();
+  });
+
+  test('long automatic playback bounds native sources and preserves order', () async {
+    final tracks = List.generate(30, (i) => Track(
+      id: 'long_$i', bvid: 'long_$i', cid: i, title: 'Track $i',
+      rawTitle: 'Track $i', uploader: 'Artist', coverUrl: '', duration: 10,
+    ));
+    await handler.playTrack(tracks.first, newQueue: tracks);
+    for (var i = 0; i < tracks.length; i++) {
+      await flushEvents();
+      await flushEvents();
+      expect(handler.currentTrack?.id, tracks[i].id);
+      // ignore: deprecated_member_use
+      final source = player.source! as ja.ConcatenatingAudioSource;
+      expect(source.length, lessThanOrEqualTo(3));
+      if (i == tracks.length - 1) break;
+      expect(downloads, contains(tracks[i + 1].id));
+      if (player.currentIndex! + 1 < source.length) {
+        player.currentIndex = player.currentIndex! + 1;
+        player.indices.add(player.currentIndex);
+      } else {
+        player.completeTrack();
+      }
+    }
   });
 
   test('start returns and prefetch runs while play Future is pending', () async {

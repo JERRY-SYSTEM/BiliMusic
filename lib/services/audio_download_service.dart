@@ -329,6 +329,9 @@ class AudioDownloadService {
         received += chunk.length;
         // Throttle progress events to ~every 64 KiB to avoid stream spam.
         if (received - lastEmitted >= 65536) {
+          // IOSink.add does not apply backpressure. Without awaiting writes,
+          // a fast CDN can queue a whole audio file in memory on slow storage.
+          await sink.flush();
           lastEmitted = received;
           _emit(DownloadProgress(track.id, received, total, false, null));
         }
