@@ -126,7 +126,7 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
-          zip -r9 "bilibeat-${{ inputs.tag }}-ios-unsigned.ipa" Payload
+          zip -r9 "bilimusic-${{ inputs.tag }}-ios-unsigned.ipa" Payload
 
       - name: Build Android arm64-v8a APK
         if: matrix.name == 'android-arm64-v8a'
@@ -160,10 +160,10 @@ jobs:
             --ks-key-alias key0 \
             --ks-pass pass:123456 \
             --key-pass pass:123456 \
-            --out "build/artifacts/bilibeat-${{ inputs.tag }}-arm64-v8a.apk" \
+            --out "build/artifacts/bilimusic-${{ inputs.tag }}-arm64-v8a.apk" \
             build/app/outputs/flutter-apk/app-release.apk
           "$APKSIGNER" verify --verbose \
-            "build/artifacts/bilibeat-${{ inputs.tag }}-arm64-v8a.apk"
+            "build/artifacts/bilimusic-${{ inputs.tag }}-arm64-v8a.apk"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

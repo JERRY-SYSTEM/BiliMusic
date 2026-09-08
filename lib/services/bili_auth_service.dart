@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'app_database.dart';
 
 import '../models/bili_session.dart';
 import 'bili_http.dart';
@@ -18,10 +18,11 @@ enum BiliQrStatus { idle, loading, waitingForScan, waitingForConfirm, expired, f
 
 class BiliAuthController extends ChangeNotifier {
   BiliAuthController._();
+  @visibleForTesting
+  BiliAuthController.forTesting();
   static final BiliAuthController instance = BiliAuthController._();
 
   static const _passport = 'https://passport.bilibili.com';
-  static const _sessionFile = 'bilibeat_bili_session.json';
   final HttpClient _client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
   Timer? _pollTimer;
   bool _polling = false;
@@ -35,14 +36,12 @@ class BiliAuthController extends ChangeNotifier {
 
   Future<void> _restoreSession() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/$_sessionFile');
-      if (await file.exists()) {
-        session = BiliSession.decode(await file.readAsString());
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('BiliBeat session restore failed: $e');
+      final saved = await AppDatabase.readState('session');
+      session = saved == null ? null : BiliSession.fromMap(saved);
+      notifyListeners();
+    } catch (_) {
+      _initializeFuture = null;
+      rethrow;
     }
   }
 
@@ -85,8 +84,8 @@ class BiliAuthController extends ChangeNotifier {
         final uid = cookies['DedeUserID'] ?? '';
         if (sessData.isEmpty || biliJct.isEmpty || uid.isEmpty) throw StateError('登录成功但 B 站未返回完整 Cookie');
         _cancelPolling();
-        session = BiliSession(sessData: sessData, biliJct: biliJct, dedeUserId: uid, refreshToken: data['refresh_token'] as String? ?? '', cookie: cookies.entries.map((e) => '${e.key}=${e.value}').join('; '));
-        await _enrichAndSave();
+        final candidate = BiliSession(sessData: sessData, biliJct: biliJct, dedeUserId: uid, refreshToken: data['refresh_token'] as String? ?? '', cookie: cookies.entries.map((e) => '${e.key}=${e.value}').join('; '));
+        await _enrichAndSave(candidate);
         status = BiliQrStatus.success;
       } else if (code == 86090) {
         status = BiliQrStatus.waitingForConfirm;
@@ -108,25 +107,26 @@ class BiliAuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> _enrichAndSave() async {
-    final current = session!;
+  Future<void> _enrichAndSave(BiliSession current) async {
+    var enriched = current;
     try {
       final json = await _get('https://api.bilibili.com/x/web-interface/nav', cookies: current.cookie);
       _check(json);
       final data = Map<String, dynamic>.from(json['data'] as Map);
       final wbi = Map<String, dynamic>.from(data['wbi_img'] as Map? ?? const {});
-      session = current.copyWith(mid: (data['mid'] as num?)?.toInt(), uname: data['uname'] as String?, face: data['face'] as String?);
+      enriched = current.copyWith(mid: (data['mid'] as num?)?.toInt(), uname: data['uname'] as String?, face: data['face'] as String?);
       // WBI keys are not required for favorite endpoints, but nav validates the session.
       if (wbi.isEmpty) debugPrint('Bilibili nav did not return wbi_img');
     } catch (_) {}
-    await _save();
+    await AppDatabase.writeState('session', enriched.toMap());
+    session = enriched;
   }
 
   Future<void> logout() async {
     _cancelPolling();
+    await AppDatabase.writeState('session', null);
     session = null;
     status = BiliQrStatus.idle;
-    await _deleteSaved();
     notifyListeners();
   }
 
@@ -140,18 +140,30 @@ class BiliAuthController extends ChangeNotifier {
       throw const FormatException('备份中的登录信息不完整');
     }
     await initialize();
+    await AppDatabase.writeState('session', imported.toMap());
+    acceptCommittedSession(imported);
+  }
+
+  /// Publish a session already committed by the backup import transaction.
+  void acceptCommittedSession(BiliSession imported) {
     _cancelPolling();
     session = imported;
     status = BiliQrStatus.success;
     qrSession = null;
     message = null;
-    await _save();
     notifyListeners();
   }
 
   void _cancelPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _cancelPolling();
+    _client.close(force: true);
+    super.dispose();
   }
 
   Future<Map<String, dynamic>> _get(String url, {String? cookies}) async {
@@ -182,14 +194,4 @@ class BiliAuthController extends ChangeNotifier {
     return result;
   }
 
-  Future<void> _save() async {
-    final dir = await getApplicationDocumentsDirectory();
-    await File('${dir.path}/$_sessionFile').writeAsString(session!.encode());
-  }
-
-  Future<void> _deleteSaved() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/$_sessionFile');
-    if (await file.exists()) await file.delete();
-  }
 }

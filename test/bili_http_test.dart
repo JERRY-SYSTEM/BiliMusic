@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bilibeat/services/bili_http.dart';
+import 'package:bilimusic/services/bili_http.dart';
 
 void main() {
   late HttpServer server;

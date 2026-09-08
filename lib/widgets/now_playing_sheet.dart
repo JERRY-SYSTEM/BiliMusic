@@ -25,7 +25,7 @@ import 'player_queue_sheet.dart';
 
 /// Full-screen "now playing" surface.
 class NowPlayingSheet extends StatefulWidget {
-  final BiliBeatAudioHandler handler;
+  final BiliMusicAudioHandler handler;
   final Track focusedTrack;
   final ValueNotifier<Duration> positionNotifier;
   final ValueNotifier<Duration> durationNotifier;

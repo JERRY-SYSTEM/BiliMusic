@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
-import '../services/audio_download_service.dart';
 import '../services/cache_inventory.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
@@ -35,17 +34,24 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     )) ?? false;
     if (!ok) return;
     setState(() => _busy = true);
-    for (final bucket in _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__'))) {
-      if (bucket.track != null) {
-        await AudioDownloadService.deleteAllForTrack(bucket.track!);
-        await DatabaseService.removeCachedLyrics(bucket.track!.id);
-        await DatabaseService.removeDownloadedTrack(bucket.track!);
+    try {
+      for (final bucket in _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__'))) {
+        if (bucket.track != null) {
+          await DatabaseService.removeDownloadedTrack(bucket.track!);
+          await DatabaseService.removeCachedLyrics(bucket.track!.id);
+        }
+        for (final id in bucket.lyricTrackIds) { await DatabaseService.removeCachedLyrics(id); }
+        for (final file in [...bucket.files, ...bucket.coverFiles]) {
+          if (await file.exists()) await file.delete();
+        }
       }
-      for (final file in [...bucket.files, ...bucket.coverFiles]) { try { await file.delete(); } catch (_) {} }
+      _selected.clear();
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('部分缓存删除失败，请重试')));
+    } finally {
+      await _reload();
+      if (mounted) setState(() => _busy = false);
     }
-    _selected.clear();
-    await _reload();
-    if (mounted) setState(() => _busy = false);
   }
 
   void _toggleAll() => setState(() {

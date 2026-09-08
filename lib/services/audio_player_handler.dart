@@ -1,16 +1,14 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 
 import '../models/track.dart';
 import 'audio_download_service.dart';
 import 'database_service.dart';
+import 'app_database.dart';
 import 'player_queue_manager.dart';
 
 enum LoopMode { off, all, one }
@@ -33,7 +31,7 @@ class PlaybackQueueState {
 ///    pre-downloaded in the background as soon as the current one starts.
 ///  * Loop/shuffle/advance logic lives in Dart; the native queue is only a
 ///    sliding window that mirrors the logical playlist around [_currentIndex].
-class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
+class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   final ja.AudioPlayer _player;
   final Future<String> Function(Track) _ensureDownloaded;
   // ignore: deprecated_member_use
@@ -126,7 +124,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     return true;
   }
 
-  BiliBeatAudioHandler({
+  BiliMusicAudioHandler({
     ja.AudioPlayer? player,
     Future<String> Function(Track)? ensureDownloaded,
   })  : _player = player ?? ja.AudioPlayer(),
@@ -158,16 +156,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  String? _statePath;
-  Future<String> _playbackStatePath() async {
-    return _statePath ??= '${(await getApplicationDocumentsDirectory()).path}/bilibeat_playback.json';
-  }
-
   Future<void> restorePersistedQueue() async {
     try {
-      final file = File(await _playbackStatePath());
-      if (!await file.exists()) return;
-      final map = Map<String, dynamic>.from(jsonDecode(await file.readAsString()));
+      final map = await AppDatabase.readPlayback();
+      if (map == null) return;
       List<Track> decode(String key) => (map[key] as List<dynamic>? ?? [])
           .map((e) => Track.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList();
@@ -200,13 +192,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   void _schedulePersist({bool immediate = false}) {
     if (immediate) {
       _persistTimer?.cancel();
-      unawaited(_persistState());
+      unawaited(_persistState().catchError((Object e) {
+        debugPrint('Playback queue persist failed: $e');
+      }));
       return;
     }
     if (_persistTimer != null) return;
     _persistTimer = Timer(const Duration(seconds: 5), () {
       _persistTimer = null;
-      unawaited(_persistState());
+      unawaited(_persistState().catchError((Object e) {
+        debugPrint('Playback queue persist failed: $e');
+      }));
     });
   }
 
@@ -214,8 +210,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     // Multiple state changes can request an immediate save in quick
     // succession (for example when starting a playlist). Serialize writes so
     // an older snapshot can never finish after the newer one.
-    _persistOperation = _persistOperation.then((_) async {
-      try {
+    final operation = _persistOperation.then((_) async {
         final map = {
           'queue': _playlist.map((t) => t.toMap()).toList(),
           'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
@@ -225,12 +220,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
           'positionMs': _player.position.inMilliseconds,
           'wasPlaying': _player.playing && !_userPaused,
         };
-        await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
-      } catch (e) {
-        debugPrint('Playback queue persist failed: $e');
-      }
+        await AppDatabase.savePlayback(map);
     });
-    return _persistOperation;
+    // Keep subsequent saves usable after a failure, but propagate the failure
+    // to explicit callers of persistPlaybackState.
+    _persistOperation = operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return operation;
   }
 
   void _emitQueue() {
@@ -1134,7 +1129,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   void _updateMediaItem(Track track) {
     final item = MediaItem(
       id: track.id,
-      album: 'BiliBeat',
+      album: 'BiliMusic',
       title: track.title,
       artist: track.uploader,
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),

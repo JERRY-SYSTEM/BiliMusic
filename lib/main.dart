@@ -32,7 +32,7 @@ import 'widgets/settings_page.dart';
 
 import 'package:audio_service/audio_service.dart';
 
-BiliBeatAudioHandler? _audioHandlerInstance;
+BiliMusicAudioHandler? _audioHandlerInstance;
 
 /// Adapts a [PageController] — a Listenable whose `page` is null until the
 /// first frame — into the [Animation] [SegmentTabs] drives its pill with.
@@ -76,7 +76,7 @@ class _PageFraction extends Animation<double> with ChangeNotifier {
 /// [main] has initialised it is a programming error — lazily constructing a
 /// second handler here would silently detach playback from the OS media
 /// session, so we fail loudly instead.
-BiliBeatAudioHandler get audioHandlerInstance {
+BiliMusicAudioHandler get audioHandlerInstance {
   final handler = _audioHandlerInstance;
   assert(handler != null, 'audioHandlerInstance read before AudioService.init');
   return handler!;
@@ -101,10 +101,10 @@ void main() async {
     systemNavigationBarContrastEnforced: false,
   ));
   _audioHandlerInstance = await AudioService.init(
-    builder: BiliBeatAudioHandler.new,
+    builder: BiliMusicAudioHandler.new,
     config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.bilibeat.channel.audio',
-      androidNotificationChannelName: 'BiliBeat',
+      androidNotificationChannelId: 'com.bilimusic.player.audio',
+      androidNotificationChannelName: 'BiliMusic',
       androidNotificationOngoing: true,
       artDownscaleWidth: 512,
       artDownscaleHeight: 512,
@@ -116,16 +116,16 @@ void main() async {
   // session notification, so the answer is "no" on most devices and that is
   // fine either way.
   if (!kIsWeb && Platform.isAndroid) {
-    const channel = MethodChannel('bilibeat/permissions');
+    const channel = MethodChannel('bilimusic/permissions');
     try {
       await channel.invokeMethod('requestNotifications');
     } catch (_) {}
   }
-  runApp(const BiliBeatApp());
+  runApp(const BiliMusicApp());
 }
 
-class BiliBeatApp extends StatelessWidget {
-  const BiliBeatApp({super.key});
+class BiliMusicApp extends StatelessWidget {
+  const BiliMusicApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +133,7 @@ class BiliBeatApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: settings,
       builder: (context, _) => MaterialApp(
-        title: 'BiliBeat',
+        title: 'BiliMusic',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.build(ThemeMode.light, Color(settings.accentValue)),
         darkTheme: AppTheme.build(ThemeMode.dark, Color(settings.accentValue)),
@@ -154,7 +154,7 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _activeTabIndex = 0;
-  late final BiliBeatAudioHandler _audioHandler = audioHandlerInstance;
+  late final BiliMusicAudioHandler _audioHandler = audioHandlerInstance;
 
   /// Player state is held in notifiers, not State fields. It changes on every
   /// play/pause and every track advance, and as plain `setState` state it
@@ -220,7 +220,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      unawaited(_audioHandler.persistPlaybackState());
+      unawaited(_audioHandler.persistPlaybackState().catchError((Object e) {
+        debugPrint('Playback queue persist failed: $e');
+      }));
     }
   }
 

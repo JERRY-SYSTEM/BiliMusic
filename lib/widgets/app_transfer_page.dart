@@ -117,7 +117,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
       final json = await _service.buildExportJson();
       final bytes = Uint8List.fromList(utf8.encode(json));
       final path = await FilePicker.saveFile(
-        dialogTitle: '保存 BiliBeat 备份',
+        dialogTitle: '保存 BiliMusic 备份',
         fileName: _exportFileName(),
         type: FileType.custom,
         allowedExtensions: const ['json'],
@@ -137,7 +137,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
     setState(() => _importing = true);
     try {
       final result = await FilePicker.pickFiles(
-        dialogTitle: '选择 BiliBeat 备份',
+        dialogTitle: '选择 BiliMusic 备份',
         type: FileType.custom,
         allowedExtensions: const ['json'],
         allowMultiple: false,
@@ -196,7 +196,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
   String _exportFileName() {
     final now = DateTime.now();
     String two(int value) => value.toString().padLeft(2, '0');
-    return 'bilibeat-backup-${now.year}${two(now.month)}${two(now.day)}-'
+    return 'bilimusic-backup-${now.year}${two(now.month)}${two(now.day)}-'
         '${two(now.hour)}${two(now.minute)}${two(now.second)}.json';
   }
 

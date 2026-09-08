@@ -1,0 +1,42 @@
+name: Verify BiliMusic
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        if: runner.os == 'Linux'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build Android
+        if: runner.os == 'Linux'
+        run: flutter build apk --debug --target-platform android-arm64
+      - name: Build unsigned iOS
+        if: runner.os == 'macOS'
+        run: flutter build ios --release --no-codesign
+      - name: Upload resolved dependency lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-lock-${{ runner.os }}
+          path: pubspec.lock

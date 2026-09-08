@@ -1,6 +1,17 @@
-# BiliBeat
+# BiliMusic
 
 基于 Flutter 开发的哔哩哔哩音频播放器。
+
+应用名称为 **BiliMusic**，Android applicationId / iOS Bundle ID 均为
+`com.bilimusic.player`，Dart 包名为 `bilimusic`。
+
+程序的歌单、歌曲元数据、历史、歌词、设置、登录会话和播放状态统一保存到
+SQLite 数据库 `bilimusic.db`；音频和封面仍是独立文件。新版不自动读取或迁移
+旧版的本地 JSON 数据，也不会主动清除旧目录。需要恢复旧数据时，请在旧版的
+设置中导出备份，再在新版中导入；现有 `schemaVersion: 1` JSON 备份仍受支持。
+包名改变后，系统将其视为另一个应用，无法直接覆盖旧包名的安装。
+
+改造内容、文件对应关系和验证状态见 [BiliMusic SQLite 改造说明](docs/bilimusic-sqlite-refactor.md)。
 
 ## 功能
 
@@ -20,14 +31,14 @@
 
 ### Android 安装
 
-1. 在 Latest Release 页面下载 `bilibeat-x.x.x-arm64-v8a.apk` 安装包。
+1. 在 Latest Release 页面下载 `bilimusic-x.x.x-arm64-v8a.apk` 安装包。
 2. 在 Android 设备安卓下载的 `.apk` 文件（需 Android 6.0 及以上版本，由于签名使用的是LSPatch默认签名，因此可能会误报为病毒）。
 
 ---
 
 ### iOS 安装
 
-BiliBeat 未上架 Apple App Store，发布构建以未签名归档包（`bilibeat-x.x.x-unsigned.ipa`）形式提供。iOS 安装前需使用个人开发者证书进行签名（需 iOS 13.0 及以上版本）。
+BiliMusic 未上架 Apple App Store，发布构建以未签名归档包（`bilimusic-x.x.x-unsigned.ipa`）形式提供。iOS 安装前需使用个人开发者证书进行签名（需 iOS 13.0 及以上版本）。
 
 #### 方式一：通过 LiveContainer 安装（推荐）
 
@@ -44,8 +55,8 @@ AltStore 支持本地安装，并可通过 Wi-Fi 自动续签后台证书。
    - 点击菜单栏或系统托盘中的 AltServer 图标，选择 `Install AltStore`，再选择已连接的 iOS 设备。
    - 使用 Apple ID 登录以签发免费开发证书。
 3. **信任描述文件**：在 iOS 设备上进入 `设置` > `通用` > `VPN 与设备管理`，在"开发者 App"下找到您的 Apple ID 并选择`信任`。
-4. **安装 BiliBeat**：
-   - 使用 iOS 设备上的 Safari 下载 `bilibeat-x.x.x-unsigned.ipa`。
+4. **安装 BiliMusic**：
+   - 使用 iOS 设备上的 Safari 下载 `bilimusic-x.x.x-unsigned.ipa`。
    - 打开 AltStore，进入"我的 App"页面，点击 `+` 图标并选择已下载的 `.ipa` 文件。
    - *自动续签*：只要主机电脑与设备处于同一 Wi-Fi 网络且保持运行，AltServer 会自动续签 7 天有效期的证书。
 
@@ -56,7 +67,7 @@ Sideloadly 是一款基于桌面端的直装工具，可通过 USB 直接安装�
 1. **安装 Sideloadly**：在 macOS 或 Windows 上从 [sideloadly.io](https://sideloadly.io) 下载并安装 Sideloadly。
 2. **部署安装包**：
    - 通过 USB 连接 iOS 设备至电脑。
-   - 启动 Sideloadly，将 `bilibeat-x.x.x-unsigned.ipa` 拖入应用窗口。
+   - 启动 Sideloadly，将 `bilimusic-x.x.x-unsigned.ipa` 拖入应用窗口。
    - 在 `Apple Account` 一栏输入您的 Apple ID，点击 `Start` 开始签名安装。
 3. **信任描述文件**：安装完成后，在 iOS 设备的 `设置` > `通用` > `VPN 与设备管理` 中信任与您 Apple ID 关联的证书。
 

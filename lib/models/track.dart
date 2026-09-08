@@ -88,8 +88,7 @@ class Track {
     };
   }
 
-  /// Tolerates both older files carrying extra keys and newer ones missing
-  /// them, so a version change never orphans a library.
+  /// Shared mapping for SQLite records and network-derived track values.
   factory Track.fromMap(Map<String, dynamic> map) {
     return Track(
       id: map['id'] ?? '',
