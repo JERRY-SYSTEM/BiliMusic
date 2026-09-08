@@ -21,6 +21,15 @@ android {
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
+    // AGP 9.3.1's CommentDetector can crash while parsing JavaDoc in
+    // image_picker_android (JavaDocParser calls List.removeLast()). These
+    // checks are not used by this app, and disabling them keeps release lint
+    // from traversing the broken parser path. The remaining lint checks still
+    // run normally.
+    lint {
+        disable += ["EasterEgg", "StopShip"]
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
