@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +10,7 @@ import 'bili_auth_service.dart';
 import 'bili_http.dart';
 import 'bilibili_sdk.dart';
 import 'database_service.dart';
+import 'app_database.dart';
 
 /// Immutable snapshot of a single track download's progress.
 class DownloadProgress {
@@ -53,6 +53,12 @@ class AudioDownloadService {
 
   static String? _dirPath;
 
+  @visibleForTesting
+  static void configureForTesting(String directory) {
+    _dirPath = directory;
+    _downloadedMemo.clear();
+  }
+
   /// Deduplicates concurrent downloads of the same track.
   static final Map<String, Future<String>> _inFlight = {};
 
@@ -67,7 +73,7 @@ class AudioDownloadService {
     final cached = _dirPath;
     if (cached != null) return cached;
     final docs = await getApplicationDocumentsDirectory();
-    final path = '${docs.path}/bilibeat_audio';
+    final path = '${docs.path}/bilimusic_audio';
     final dir = Directory(path);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
@@ -81,33 +87,7 @@ class AudioDownloadService {
   static String _key(Track track) =>
       track.id.isNotEmpty ? track.id : track.bvid;
 
-  static String _audioPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.m4a' : '$dir/audio_${key}_$quality.m4a';
-  static String _readyPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.ready' : '$dir/audio_${key}_$quality.ready';
-  static String _metaPath(String dir, String key, [int? quality]) => quality == null ? '$dir/audio_$key.json' : '$dir/audio_${key}_$quality.json';
-
-  /// Saves track metadata JSON next to the audio file (used for rediscovery).
-  ///
-  /// Playback calls this on every start, with whatever `Track` object the
-  /// caller happens to be holding — which may predate an edit the user made in
-  /// 信息与歌词. Writing that unconditionally silently reverted the edit on
-  /// disk, so by default this only *creates* the file. Deliberate edits pass
-  /// [force] to overwrite.
-  static Future<void> saveTrackMetadata(Track track,
-      {bool force = false}) async {
-    try {
-      final dir = await _dir();
-      final metaFile = File(_metaPath(dir, _key(track)));
-      if (!force && await metaFile.exists()) return;
-      final encoded = jsonEncode(track.toMap());
-      if (await metaFile.exists() && await metaFile.readAsString() == encoded) {
-        return;
-      }
-      await metaFile.writeAsString(encoded);
-    } catch (e) {
-      debugPrint('saveTrackMetadata error: $e');
-    }
-  }
-
+  static String _audioPath(String dir, String key, [int? quality]) => quality == null || quality == 0 ? '$dir/audio_$key.m4a' : '$dir/audio_${key}_$quality.m4a';
   /// Memoised answers for [isDownloadedById].
   ///
   /// Every row of every list asks this on build, and each answer costs three
@@ -130,16 +110,8 @@ class AudioDownloadService {
   /// checking only the default (quality 0) path incorrectly leaves the
   /// download button visible after a successful high-quality download.
   static Future<bool> isAnyQualityDownloaded(Track track) async {
-    final dir = await _dir();
-    final prefix = 'audio_${_key(track)}';
-    for (final entity in await Directory(dir).list().toList()) {
-      if (entity is! File) continue;
-      final name = entity.uri.pathSegments.last;
-      if (!name.startsWith(prefix) || !name.endsWith('.ready')) continue;
-      final quality = name == '$prefix.ready'
-          ? null
-          : int.tryParse(name.substring(prefix.length + 1, name.length - 6));
-      if (await isDownloadedById(_key(track), quality: quality)) return true;
+    for (final row in await AppDatabase.downloads(trackId: _key(track))) {
+      if (await isDownloadedById(_key(track), quality: row['quality'] as int)) return true;
     }
     return false;
   }
@@ -158,50 +130,59 @@ class AudioDownloadService {
   }
 
   static Future<bool> _statDownloaded(String id, int? quality) async {
-    final dir = await _dir();
-    final audio = File(_audioPath(dir, id, quality));
-    final ready = File(_readyPath(dir, id, quality));
-    if (!await ready.exists()) return false;
-    if (!await audio.exists()) return false;
-    return await audio.length() > 0;
+    final rows = await AppDatabase.downloads(trackId: id);
+    for (final row in rows.where((row) => row['quality'] == (quality ?? 0))) {
+      final audio = File(row['path'] as String);
+      if (await audio.exists() && await audio.length() == row['bytes'] && (row['bytes'] as int) > 0) return true;
+      await AppDatabase.forgetDownload(id, quality ?? 0);
+    }
+    return false;
   }
 
-  /// Removes a track's audio, ready-marker and metadata from disk.
-  /// Returns true when something was actually deleted.
-  static Future<bool> delete(Track track, {int? quality}) async {
-    final dir = await _dir();
-    final id = _key(track);
-    var deleted = false;
-    for (final path in [
-      _readyPath(dir, id, quality),
-      _audioPath(dir, id, quality),
-      _metaPath(dir, id, quality),
-      '${_audioPath(dir, id, quality)}.part',
-    ]) {
-      final file = File(path);
-      try {
-        if (await file.exists()) {
-          await file.delete();
-          deleted = true;
-        }
-      } catch (e) {
-        debugPrint('delete download error: $e');
+  /// Reconcile registered downloads with disk without rediscovering old files.
+  /// Unregistered files remain visible in the cache inventory's Other bucket.
+  static Future<void> reconcileDownloads() async {
+    for (final row in await AppDatabase.downloads()) {
+      final id = row['track_id'] as String;
+      final quality = row['quality'] as int;
+      final file = File(row['path'] as String);
+      if (!await file.exists() || await file.length() != row['bytes']) {
+        await AppDatabase.forgetDownload(id, quality);
+        _downloadedMemo.remove('${id}_$quality');
       }
     }
-    _downloadedMemo['${id}_${quality ?? 0}'] = false;
+  }
+
+  /// Remove one quality, updating the index only after its file is removed.
+  static Future<bool> delete(Track track, {int? quality}) async {
+    final id = _key(track);
+    final dir = await _dir();
+    var deleted = false;
+    for (final row in await AppDatabase.downloads(trackId: id)) {
+      if (row['quality'] != (quality ?? 0)) continue;
+      final file = File(row['path'] as String);
+      if (await file.exists()) { await file.delete(); deleted = true; }
+    }
+    final part = File('${_audioPath(dir, id, quality)}.part');
+    if (await part.exists()) { await part.delete(); deleted = true; }
+    await AppDatabase.forgetDownload(id, quality ?? 0);
+    _downloadedMemo.remove('${id}_${quality ?? 0}');
     return deleted;
   }
 
-  /// Removes every quality variant belonging to a track.
   static Future<void> deleteAllForTrack(Track track) async {
-    final dir = await _dir();
-    final prefix = 'audio_${_key(track)}';
-    for (final entity in await Directory(dir).list().toList()) {
-      if (entity is File && entity.uri.pathSegments.last.startsWith(prefix)) {
-        try { await entity.delete(); } catch (_) {}
-      }
+    final id = _key(track);
+    for (final row in await AppDatabase.downloads(trackId: id)) {
+      final file = File(row['path'] as String);
+      if (await file.exists()) await file.delete();
     }
-    _downloadedMemo.removeWhere((key, _) => key.startsWith('${_key(track)}_'));
+    // Match the whole track id, not a prefix that can also match another part.
+    final pattern = RegExp('^audio_${RegExp.escape(id)}(?:_[0-9]+)?\\.m4a(?:\\.part)?\$');
+    for (final entity in await Directory(await _dir()).list().toList()) {
+      if (entity is File && pattern.hasMatch(entity.uri.pathSegments.last)) await entity.delete();
+    }
+    await AppDatabase.forgetDownload(id, null);
+    _downloadedMemo.removeWhere((key, _) => key.startsWith('${id}_'));
   }
 
   /// Ensures [track]'s audio is fully downloaded and returns the local path.
@@ -223,11 +204,9 @@ class AudioDownloadService {
     final dir = await _dir();
     final id = _key(track);
     final path = _audioPath(dir, id, quality?.id);
-    await saveTrackMetadata(track);
-    // Already on disk: no DB write either — registration happens at download
-    // time (below) and at library load, so replaying every track start would
-    // just be an O(n) scan over the library for nothing.
-    if (await isDownloadedById(id, quality: quality?.id)) {
+    // Validate again before playback: a file may have disappeared since a
+    // list row last asked for its cached download status.
+    if (await _statDownloaded(id, quality?.id)) {
       return path;
     }
 
@@ -235,7 +214,7 @@ class AudioDownloadService {
     final existing = _inFlight[flightKey];
     if (existing != null) return existing;
 
-    final future = _download(track, dir, path, quality);
+    final future = _download(track, path, quality);
     _inFlight[flightKey] = future;
     try {
       return await future;
@@ -244,7 +223,7 @@ class AudioDownloadService {
     }
   }
 
-  static Future<String> _download(Track track, String dir, String path, AudioQualityOption? quality) async {
+  static Future<String> _download(Track track, String path, AudioQualityOption? quality) async {
     var url = quality?.url ?? track.audioUrl;
     if (url == null || url.isEmpty) {
       final info = await BilibiliSdk.fetchAudioStream(track.bvid, track.cid);
@@ -274,22 +253,25 @@ class AudioDownloadService {
       }
 
       final res = await req.close();
-      // A .part that already covers the whole file (e.g. a crash between the
-      // rename and the .ready marker) makes the CDN answer 416. The bytes on
-      // disk are complete — finalize them instead of failing the download.
+      // Only finalize a resumed 416 when Content-Range proves the local size
+      // matches the complete resource. A stale/oversized partial is not audio.
       if (res.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
           existing > 0) {
+        final range = res.headers.value(HttpHeaders.contentRangeHeader);
+        final total = int.tryParse(range?.split('/').last ?? '');
         await res.drain<void>();
+        if (total != existing || existing < 1024) {
+          await tmp.delete();
+          throw Exception('下载断点已失效，请重试');
+        }
         final destination = File(path);
         if (await destination.exists()) {
           await destination.delete();
         }
         await tmp.rename(path);
-        await File(_readyPath(dir, _key(track), quality?.id)).create();
-        await saveTrackMetadata(track);
+        await DatabaseService.registerDownload(track, quality?.id ?? 0, path, await File(path).length());
         _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
         _emit(DownloadProgress(track.id, existing, existing, true, null));
-        await DatabaseService.saveDownloadedTrack(track);
         return path;
       }
       if (res.statusCode != HttpStatus.ok &&
@@ -355,12 +337,10 @@ class AudioDownloadService {
         await destination.delete();
       }
       await tmp.rename(path);
-      await File(_readyPath(dir, _key(track), quality?.id)).create();
-      await saveTrackMetadata(track);
+      await DatabaseService.registerDownload(track, quality?.id ?? 0, path, await File(path).length());
       _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
 
       _emit(DownloadProgress(track.id, received, total, true, null));
-      await DatabaseService.saveDownloadedTrack(track);
       return path;
     } catch (e) {
       try {

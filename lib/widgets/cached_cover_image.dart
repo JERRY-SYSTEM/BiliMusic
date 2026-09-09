@@ -157,7 +157,7 @@ class _CachedCoverImageState extends State<CachedCoverImage>
       // Application Support, not the temp dir: iOS/Android may purge temp
       // under storage pressure, which silently re-downloaded every cover.
       final supportDir = await getApplicationSupportDirectory();
-      final cacheDir = Directory('${supportDir.path}/bilibeat_covers');
+      final cacheDir = Directory('${supportDir.path}/bilimusic_covers');
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
       }

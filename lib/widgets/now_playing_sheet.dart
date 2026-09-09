@@ -25,7 +25,7 @@ import 'player_queue_sheet.dart';
 
 /// Full-screen "now playing" surface.
 class NowPlayingSheet extends StatefulWidget {
-  final BiliBeatAudioHandler handler;
+  final BiliMusicAudioHandler handler;
   final Track focusedTrack;
   final ValueNotifier<Duration> positionNotifier;
   final ValueNotifier<Duration> durationNotifier;
@@ -180,7 +180,9 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
   Future<void> _refreshTrackState() async {
     final track = _displayTrack;
     final results = await Future.wait([
-      AudioDownloadService.isDownloaded(track),
+      // Playlist downloads may use a non-default quality. The player control
+      // should reflect the same aggregate cache state as playlist rows.
+      AudioDownloadService.isAnyQualityDownloaded(track),
       DatabaseService.isFavorite(track.id),
     ]);
     if (!mounted || _displayTrack.id != track.id) return;
@@ -192,7 +194,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
 
   Future<void> _refreshDownloaded() async {
     final track = _displayTrack;
-    final downloaded = await AudioDownloadService.isDownloaded(track);
+    final downloaded = await AudioDownloadService.isAnyQualityDownloaded(track);
     if (!mounted || _displayTrack.id != track.id) return;
     setState(() => _isDownloaded = downloaded);
   }

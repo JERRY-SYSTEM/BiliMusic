@@ -185,11 +185,11 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         decoration: BoxDecoration(
           color: context.palette.surfaceDeep,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          boxShadow: [
-            const BoxShadow(
+          boxShadow: const [
+            BoxShadow(
               color: AppColors.black50,
               blurRadius: 24,
-              offset: const Offset(0, -4),
+              offset: Offset(0, -4),
             ),
           ],
         ),
@@ -655,7 +655,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
           await ImagePicker().pickImage(source: ImageSource.gallery);
       if (image == null) return;
       final docs = await getApplicationDocumentsDirectory();
-      final dir = Directory('${docs.path}/bilibeat_covers');
+      final dir = Directory('${docs.path}/bilimusic_covers');
       if (!await dir.exists()) await dir.create(recursive: true);
       final ext = image.path.split('.').last;
       final saved = File(

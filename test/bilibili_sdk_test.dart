@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:bilibeat/services/bilibili_sdk.dart';
+import 'package:bilimusic/services/bilibili_sdk.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

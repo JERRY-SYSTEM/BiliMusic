@@ -445,7 +445,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
           const SizedBox(width: 7),
           const Text(
             '点击正在唱的那行歌词',
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -545,7 +545,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
             Icon(Icons.my_location_rounded, color: context.palette.accent, size: 15),
             const SizedBox(width: 6),
             const Text('回到当前',
-                style: const TextStyle(
+                style: TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600)),

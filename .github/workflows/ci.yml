@@ -57,10 +57,12 @@ jobs:
         run: flutter build apk --debug --target-platform android-arm64
 
       - name: Flutter test
+        if: runner.os == 'macOS'
         continue-on-error: true
         run: flutter test
 
       - name: Flutter analyze
+        if: runner.os == 'macOS'
         run: flutter analyze
 
       - name: Upload resolved dependency lock

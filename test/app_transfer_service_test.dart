@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:bilibeat/services/app_transfer_service.dart';
-import 'package:bilibeat/theme/app_theme.dart';
-import 'package:bilibeat/widgets/settings_page.dart';
+import 'package:bilimusic/services/app_transfer_service.dart';
+import 'package:bilimusic/theme/app_theme.dart';
+import 'package:bilimusic/widgets/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

@@ -1,683 +1,205 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
-
-import '../models/track.dart';
-import '../models/playlist.dart';
+import 'package:sqflite/sqflite.dart';
+import '../models/bili_session.dart';
 import '../models/lyric_line.dart';
+import '../models/playlist.dart';
+import '../models/track.dart';
+import 'app_database.dart';
 import 'audio_download_service.dart';
 
-/// Parse helpers run inside a background isolate (via [compute]): a large
-/// library means several files of jsonDecode + object construction, and doing
-/// that on the UI isolate blocked the first frame after startup. They are
-/// top-level because isolate entry points must be top-level or static, and
-/// they only touch pure model constructors — never the service's static state.
-List<Track> _parseTrackList(String json) {
-  final list =
-      DatabaseService._readPayload(jsonDecode(json)) as List<dynamic>? ?? [];
-  return list
-      .map((item) => Track.fromMap(Map<String, dynamic>.from(item)))
-      .toList();
-}
-
-List<Playlist> _parsePlaylistList(String json) {
-  final list =
-      DatabaseService._readPayload(jsonDecode(json)) as List<dynamic>? ?? [];
-  return list.map((item) {
-    final map = Map<String, dynamic>.from(item);
-    final tracks = (map['tracks'] as List<dynamic>? ?? [])
-        .map((t) => Track.fromMap(Map<String, dynamic>.from(t)))
-        .toList();
-    return Playlist.fromMap(map, tracks: tracks);
-  }).toList();
-}
-
-Map<String, LyricsResult> _parseLyricsMap(String json) {
-  final map = DatabaseService._readPayload(jsonDecode(json))
-      as Map<String, dynamic>? ?? {};
-  final result = <String, LyricsResult>{};
-  map.forEach((key, value) {
-    try {
-      result[key] =
-          LyricsResult.fromMap(Map<String, dynamic>.from(value as Map));
-    } catch (e) {
-      debugPrint('Lyrics cache entry $key skipped: $e');
+/// SQLite is authoritative. Detached reads and post-commit notifications keep
+/// unsuccessful writes from leaking into the visible library.
+class DatabaseService {
+  static final _libraryUpdates = StreamController<void>.broadcast();
+  static final _historyUpdates = StreamController<void>.broadcast();
+  static Stream<void> get libraryUpdateStream => _libraryUpdates.stream;
+  static Stream<void> get historyUpdateStream => _historyUpdates.stream;
+  static int _playlistSeq = 0;
+  static Future<T> _write<T>(Future<T> Function(Transaction) action, {bool library = false, bool history = false}) async {
+    final result = await (await AppDatabase.instance).transaction((txn) async {
+      final result = await action(txn);
+      await AppDatabase.pruneTracks(txn);
+      return result;
+    });
+    if (library) _libraryUpdates.add(null);
+    if (history) _historyUpdates.add(null);
+    return result;
+  }
+  static Future<List<Track>> _tracks(DatabaseExecutor db, String table) async {
+    final rows = await db.rawQuery('SELECT t.payload FROM $table r JOIN tracks t ON t.id = r.track_id ORDER BY r.position');
+    return rows.map((r) => Track.fromMap(AppDatabase.decode(r['payload']))).toList();
+  }
+  static Future<List<Playlist>> _playlists(DatabaseExecutor db) async {
+    final rows = await db.query('playlists', orderBy: 'position');
+    final result = <Playlist>[];
+    for (final row in rows) {
+      final members = await db.rawQuery('SELECT t.payload FROM playlist_tracks p JOIN tracks t ON t.id = p.track_id WHERE p.playlist_id = ? ORDER BY p.position', [row['id']]);
+      result.add(Playlist.fromMap(AppDatabase.decode(row['payload']), tracks: members.map((r) => Track.fromMap(AppDatabase.decode(r['payload']))).toList()));
+    }
+    return result;
+  }
+  static Future<void> _savePlaylists(DatabaseExecutor db, List<Playlist> playlists) async {
+    await db.delete('playlist_tracks');
+    await db.delete('playlists');
+    for (var i = 0; i < playlists.length; i++) {
+      final p = playlists[i];
+      await db.insert('playlists', {'id': p.id, 'position': i, 'payload': jsonEncode(p.toMap())});
+      final seen = <String>{};
+      for (var j = 0; j < p.tracks.length; j++) {
+        final t = p.tracks[j];
+        if (!seen.add(t.id)) continue;
+        await AppDatabase.putTrack(db, t);
+        await db.insert('playlist_tracks', {'playlist_id': p.id, 'track_id': t.id, 'position': j});
+      }
+    }
+  }
+  static Future<void> _editPlaylists(void Function(List<Playlist>) edit) => _write((txn) async {
+    final all = await _playlists(txn);
+    edit(all);
+    await _savePlaylists(txn, all);
+  }, library: true);
+  static Future<List<Playlist>> getPlaylists() async => (await AppDatabase.instance).transaction(_playlists);
+  static Future<Playlist> getFavoritesPlaylist() async => (await getPlaylists()).firstWhere((p) => p.id == Playlist.favoritesId);
+  static Future<Playlist> createPlaylist(String name) async {
+    final p = Playlist(id: 'pl_${DateTime.now().microsecondsSinceEpoch}_${_playlistSeq++}', name: name.trim().isEmpty ? '新建歌单' : name.trim(), tracks: []);
+    await _editPlaylists((all) => all.add(p));
+    return p;
+  }
+  static Future<Playlist> createOnlinePlaylist({required String remoteId, required String name, String? coverUrl, required List<Track> tracks}) async {
+    final p = Playlist(id: 'online_$remoteId', name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
+    await _editPlaylists((all) { all.removeWhere((p) => p.remoteId == remoteId); all.add(p); });
+    return p;
+  }
+  static Future<void> renamePlaylist(String id, String name) => _editPlaylists((all) {
+    final i = all.indexWhere((p) => p.id == id);
+    if (i < 0 || name.trim().isEmpty) return;
+    all[i] = Playlist.fromMap(all[i].toMap()..['name'] = name.trim(), tracks: all[i].tracks);
+  });
+  static Future<void> setPlaylistCover(String id, String? path) => _editPlaylists((all) {
+    final i = all.indexWhere((p) => p.id == id);
+    if (i >= 0) all[i] = Playlist.fromMap(all[i].toMap()..['coverUrl'] = path, tracks: all[i].tracks);
+  });
+  static Future<void> deletePlaylist(String id) => _editPlaylists((all) { if (id != Playlist.favoritesId) all.removeWhere((p) => p.id == id); });
+  static void _move(List<Track> tracks, int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= tracks.length) return;
+    final t = tracks.removeAt(oldIndex);
+    tracks.insert(newIndex.clamp(0, tracks.length), t);
+  }
+  static Future<void> reorderPlaylist(String id, int oldIndex, int newIndex) => _editPlaylists((all) {
+    for (final p in all.where((p) => p.id == id)) { _move(p.tracks, oldIndex, newIndex); }
+  });
+  static Future<void> addTrackToPlaylist(String id, Track t) => addTracksToPlaylist(id, [t]);
+  static Future<void> addTracksToPlaylist(String id, List<Track> tracks) => _editPlaylists((all) {
+    for (final p in all.where((p) => p.id == id)) {
+      final seen = p.tracks.map((t) => t.id).toSet();
+      for (final t in tracks) { if (seen.add(t.id)) p.tracks.insert(0, t); }
     }
   });
-  return result;
-}
-
-class DatabaseService {
-  static final List<Track> _recentlyPlayed = [];
-  static final List<Track> _downloadedTracks = [];
-  static final Map<String, LyricsResult> _lyricsCache = {};
-  static final List<String> _searchHistory = [];
-  static final StreamController<void> _libraryUpdateController = StreamController<void>.broadcast();
-  static final StreamController<void> _historyUpdateController = StreamController<void>.broadcast();
-  static Future<void>? _loadFuture;
-
-  /// Emitted when the library changes: downloads, playlists or favourites.
-  /// Screens subscribe to this instead of relying on whichever call site
-  /// happened to make the change to also remember to refresh them.
-  static Stream<void> get libraryUpdateStream => _libraryUpdateController.stream;
-
-  /// Emitted when the recently-played list changes — including when the audio
-  /// handler auto-advances, which no UI action would otherwise notice.
-  static Stream<void> get historyUpdateStream => _historyUpdateController.stream;
-
-  /// Cap on the in-memory + on-disk lyrics cache.
-  static const int _maxLyricsCacheEntries = 200;
-
-  static final List<Playlist> _playlists = [
-    Playlist(id: Playlist.favoritesId, name: '收藏', tracks: [])
-  ];
-
-  static int _playlistSeq = 0;
-
-  /// Cached documents directory. The path is fixed for the lifetime of the
-  /// app, yet every persist used to re-fetch it across the platform channel.
-  static String? _docsPath;
-  static Future<String> _docs() async {
-    final cached = _docsPath;
-    if (cached != null) return cached;
-    final docs = await getApplicationDocumentsDirectory();
-    return _docsPath = docs.path;
-  }
-
-  static Future<void> _ensureLoaded() => _loadFuture ??= _load();
-
-  static Future<void> _load() async {
-    try {
-      final dir = await _docs();
-
-      // Each file is parsed into a local list first, then swapped into the
-      // store: one corrupt file must not wipe the whole in-memory library
-      // (a truncated write is easy with whole-file rewrites).
-      await _loadTracks('$dir/bilibeat_downloaded.json', _downloadedTracks);
-      await _discoverAudioFiles(dir);
-      await _loadTracks('$dir/bilibeat_recently_played.json', _recentlyPlayed);
-      await _loadPlaylists('$dir/bilibeat_playlists.json');
-      await _loadSearchHistory('$dir/bilibeat_search_history.json');
-      await _loadLyricsCache('$dir/bilibeat_lyrics.json');
-    } catch (e) {
-      debugPrint('DatabaseService _ensureLoaded error: $e');
+  static Future<void> removeTrackFromPlaylist(String id, String trackId) => removeTracksFromPlaylist(id, [trackId]);
+  static Future<void> removeTracksFromPlaylist(String id, List<String> ids) => _editPlaylists((all) {
+    final removed = ids.toSet();
+    for (final p in all.where((p) => p.id == id)) { p.tracks.removeWhere((t) => removed.contains(t.id)); }
+  });
+  static Future<bool> isFavorite(String id) async => (await getFavoritesPlaylist()).tracks.any((t) => t.id == id);
+  static Future<bool> toggleFavorite(Track t) => _write((txn) async {
+    final all = await _playlists(txn);
+    final p = all.firstWhere((p) => p.id == Playlist.favoritesId);
+    final exists = p.tracks.any((item) => item.id == t.id);
+    if (exists) { p.tracks.removeWhere((item) => item.id == t.id); } else { p.tracks.insert(0, t); }
+    await _savePlaylists(txn, all);
+    return !exists;
+  }, library: true);
+  static Future<void> _saveOrder(DatabaseExecutor db, String table, List<Track> tracks) async {
+    await db.delete(table);
+    for (var i = 0; i < tracks.length; i++) {
+      await AppDatabase.putTrack(db, tracks[i]);
+      await db.insert(table, {'track_id': tracks[i].id, 'position': i});
     }
   }
-
-  static Future<void> _loadTracks(String path, List<Track> store) async {
-    try {
-      final file = File(path);
-      if (!await file.exists()) return;
-      // Parse (jsonDecode + Track construction) in a background isolate so a
-      // large library does not stall the first frame after startup.
-      final tracks = await compute(_parseTrackList, await file.readAsString());
-      store
-        ..clear()
-        ..addAll(tracks);
-    } catch (e) {
-      debugPrint('DatabaseService load $path skipped: $e');
-    }
-  }
-
-  static Future<void> _discoverAudioFiles(String dir) async {
-    try {
-      final audioDir = Directory('$dir/bilibeat_audio');
-      if (!await audioDir.exists()) return;
-      final entities = await audioDir.list().toList();
-      for (final entity in entities) {
-        if (entity is File && entity.path.endsWith('.ready')) {
-          final readyPath = entity.path;
-          final audioPath = readyPath.replaceFirst('.ready', '.m4a');
-          final metaPath = readyPath.replaceFirst('.ready', '.json');
-          final audioFile = File(audioPath);
-          final metaFile = File(metaPath);
-
-          if (await audioFile.exists() && (await audioFile.length()) > 0 && await metaFile.exists()) {
-            try {
-              final metaContent = await metaFile.readAsString();
-              final trackMap = Map<String, dynamic>.from(jsonDecode(metaContent));
-              final track = Track.fromMap(trackMap);
-              if (!_downloadedTracks.any((t) => t.id == track.id)) {
-                _downloadedTracks.add(track);
-              }
-            } catch (e) {
-              debugPrint('Auto-discover track error: $e');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('DatabaseService audio discovery skipped: $e');
-    }
-  }
-
-  static Future<void> _loadPlaylists(String path) async {
-    try {
-      final file = File(path);
-      if (!await file.exists()) return;
-      final playlists =
-          await compute(_parsePlaylistList, await file.readAsString());
-      if (!playlists.any((p) => p.id == Playlist.favoritesId)) {
-        playlists.insert(0, Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []));
-      }
-      _playlists
-        ..clear()
-        ..addAll(playlists);
-    } catch (e) {
-      debugPrint('DatabaseService load $path skipped: $e');
-    }
-  }
-
-  static Future<void> _loadSearchHistory(String path) async {
-    try {
-      final file = File(path);
-      if (!await file.exists()) return;
-      final list = _readPayload(jsonDecode(await file.readAsString()))
-          as List<dynamic>? ?? [];
-      _searchHistory
-        ..clear()
-        ..addAll(list.map((e) => e.toString()));
-    } catch (e) {
-      debugPrint('DatabaseService load $path skipped: $e');
-    }
-  }
-
-  static Future<void> _loadLyricsCache(String path) async {
-    try {
-      final file = File(path);
-      if (!await file.exists()) return;
-      final parsed = await compute(_parseLyricsMap, await file.readAsString());
-      _lyricsCache
-        ..clear()
-        ..addAll(parsed);
-    } catch (e) {
-      debugPrint('DatabaseService load $path skipped: $e');
-    }
-  }
-
-  /// Whole-file rewrites are truncated-then-written by default; a crash in the
-  /// middle corrupts the file. Writing to a temp file and renaming keeps the
-  /// previous snapshot intact instead.
-  static Future<void> _writeJsonAtomically(String path, Object data) async {
-    final tmp = File('$path.tmp');
-    await tmp.writeAsString(jsonEncode(data));
-    await tmp.rename(path);
-  }
-
-  /// Envelope version for every file this service writes. Bump when a payload
-  /// shape changes incompatibly and teach the matching loader to migrate the
-  /// old version. Files written before versioning existed hold bare payloads
-  /// (no envelope); every loader accepts both, so the first write after an
-  /// upgrade migrates each file in place.
-  static const int schemaVersion = 1;
-
-  static Map<String, dynamic> _envelope(Object payload) =>
-      {'schema_version': schemaVersion, 'data': payload};
-
-  /// Unwraps a persisted payload, accepting both the versioned envelope and
-  /// the bare legacy shape. Returns null for envelopes written by a NEWER
-  /// schema than this build understands: guessing at unknown future data and
-  /// then re-persisting the guess would destroy it.
-  static dynamic _readPayload(dynamic decoded) {
-    if (decoded is Map && decoded.containsKey('schema_version')) {
-      final version = decoded['schema_version'];
-      if (version is int && version > schemaVersion) {
-        debugPrint('DatabaseService: file has schema_version $version > '
-            '$schemaVersion; written by a newer build, skipping');
-        return null;
-      }
-      return decoded['data'];
-    }
-    return decoded;
-  }
-
-  static Future<void> _persistDownloaded() async {
-    try {
-      final dir = await _docs();
-      await _writeJsonAtomically('$dir/bilibeat_downloaded.json',
-          _envelope(_downloadedTracks.map((t) => t.toMap()).toList()));
-    } catch (e) {
-      debugPrint('DatabaseService _persistDownloaded error: $e');
-    }
-  }
-
-  static Future<void> _persistRecentlyPlayed() async {
-    try {
-      final dir = await _docs();
-      await _writeJsonAtomically('$dir/bilibeat_recently_played.json',
-          _envelope(_recentlyPlayed.map((t) => t.toMap()).toList()));
-    } catch (e) {
-      debugPrint('DatabaseService _persistRecentlyPlayed error: $e');
-    }
-  }
-
-  static Future<void> _persistPlaylists() async {
-    try {
-      final dir = await _docs();
-      final list = _playlists.map((p) {
-        final map = p.toMap();
-        map['tracks'] = p.tracks.map((t) => t.toMap()).toList();
-        return map;
-      }).toList();
-      await _writeJsonAtomically('$dir/bilibeat_playlists.json', _envelope(list));
-    } catch (e) {
-      debugPrint('DatabaseService _persistPlaylists error: $e');
-    }
-    if (!_libraryUpdateController.isClosed) _libraryUpdateController.add(null);
-  }
-
-  static Future<void> _persistSearchHistory() async {
-    try {
-      final dir = await _docs();
-      await _writeJsonAtomically(
-          '$dir/bilibeat_search_history.json', _envelope(_searchHistory));
-    } catch (e) {
-      debugPrint('DatabaseService _persistSearchHistory error: $e');
-    }
-  }
-
-  static Future<List<String>> getSearchHistory() async {
-    await _ensureLoaded();
-    return List<String>.from(_searchHistory);
-  }
-
-  static Future<List<String>> addSearchHistory(String query) async {
-    await _ensureLoaded();
-    final q = query.trim();
-    if (q.isEmpty) return List<String>.from(_searchHistory);
-    _searchHistory.remove(q);
-    _searchHistory.insert(0, q);
-    if (_searchHistory.length > 12) _searchHistory.removeLast();
-    await _persistSearchHistory();
-    return List<String>.from(_searchHistory);
-  }
-
-  static Future<void> clearSearchHistory() async {
-    await _ensureLoaded();
-    _searchHistory.clear();
-    await _persistSearchHistory();
-  }
-
-  static Future<void> updateTrackMetadata(Track updated) async {
-    await _ensureLoaded();
-    final dlIdx = _downloadedTracks.indexWhere((t) => t.id == updated.id);
-    if (dlIdx != -1) {
-      _downloadedTracks[dlIdx] = updated;
-      await _persistDownloaded();
-    }
-
-    // Deliberate edit: this one does overwrite the on-disk copy.
-    await AudioDownloadService.saveTrackMetadata(updated, force: true);
-
-    for (final pl in _playlists) {
-      final idx = pl.tracks.indexWhere((t) => t.id == updated.id);
-      if (idx != -1) {
-        pl.tracks[idx] = updated;
-      }
-    }
-    await _persistPlaylists();
-
-    final recIdx = _recentlyPlayed.indexWhere((t) => t.id == updated.id);
-    if (recIdx != -1) {
-      _recentlyPlayed[recIdx] = updated;
-      await _persistRecentlyPlayed();
-    }
-
-    // _persistPlaylists above already emitted the library update.
-    if (!_historyUpdateController.isClosed) _historyUpdateController.add(null);
-  }
-
-  static Future<List<Playlist>> getPlaylists() async {
-    await _ensureLoaded();
-    return List<Playlist>.from(_playlists);
-  }
-
-  /// Returns only user-authored lyrics for tracks included in a backup.
-  static Future<Map<String, LyricsResult>> getManualLyrics(
-      Set<String> trackIds) async {
-    await _ensureLoaded();
-    return Map<String, LyricsResult>.fromEntries(_lyricsCache.entries.where(
-      (entry) => trackIds.contains(entry.key) && entry.value.isManual,
-    ));
-  }
-
-  /// Commits a fully prepared playlist snapshot and imported manual lyrics.
-  ///
-  /// Import orchestration builds the complete result in memory first, then
-  /// calls this once so large backups do not rewrite the database per track.
-  /// Existing network-provided lyrics remain intact; imported manual lyrics
-  /// replace entries for the same track id.
-  static Future<void> replacePlaylistsAndManualLyrics({
-    required List<Playlist> playlists,
-    required Map<String, LyricsResult> manualLyrics,
-    Map<String, Track> trackOverrides = const {},
-  }) async {
-    await _ensureLoaded();
-    final replacement = playlists
-        .map((playlist) => Playlist(
-              id: playlist.id,
-              name: playlist.name,
-              coverUrl: playlist.coverUrl,
-              remoteId: playlist.remoteId,
-              isOnline: playlist.isOnline,
-              lastSyncedAt: playlist.lastSyncedAt,
-              tracks: playlist.tracks,
-            ))
-        .toList();
-    if (!replacement.any((playlist) => playlist.id == Playlist.favoritesId)) {
-      replacement.insert(
-        0,
-        Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []),
-      );
-    }
-    _playlists
-      ..clear()
-      ..addAll(replacement);
-    _lyricsCache.addAll(manualLyrics);
-    await _persistLyrics();
-    var downloadedChanged = false;
-    for (var index = 0; index < _downloadedTracks.length; index++) {
-      final override = trackOverrides[_downloadedTracks[index].id];
-      if (override == null) continue;
-      _downloadedTracks[index] = _downloadedTracks[index].copyWith(
-        title: override.title,
-        uploader: override.uploader,
-      );
-      downloadedChanged = true;
-    }
-    if (downloadedChanged) await _persistDownloaded();
-    var historyChanged = false;
-    for (var index = 0; index < _recentlyPlayed.length; index++) {
-      final override = trackOverrides[_recentlyPlayed[index].id];
-      if (override == null) continue;
-      _recentlyPlayed[index] = _recentlyPlayed[index].copyWith(
-        title: override.title,
-        uploader: override.uploader,
-      );
-      historyChanged = true;
-    }
-    if (historyChanged) {
-      await _persistRecentlyPlayed();
-      if (!_historyUpdateController.isClosed) {
-        _historyUpdateController.add(null);
-      }
-    }
-    // Publish the library event after every affected in-memory store is ready.
-    await _persistPlaylists();
-  }
-
-  static Future<Playlist> getFavoritesPlaylist() async {
-    await _ensureLoaded();
-    return _playlists.firstWhere(
-      (p) => p.id == Playlist.favoritesId,
-      orElse: () => Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []),
-    );
-  }
-
-  static Future<Playlist> createPlaylist(String name) async {
-    await _ensureLoaded();
-    final newPlaylist = Playlist(
-      id: 'pl_${DateTime.now().millisecondsSinceEpoch}_${_playlistSeq++}',
-      name: name.trim().isEmpty ? '新建歌单' : name.trim(),
-      tracks: [],
-    );
-    _playlists.add(newPlaylist);
-    await _persistPlaylists();
-    return newPlaylist;
-  }
-
-  static Future<Playlist> createOnlinePlaylist({required String remoteId, required String name, String? coverUrl, required List<Track> tracks}) async {
-    await _ensureLoaded();
-    final playlist = Playlist(id: 'online_$remoteId', name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
-    _playlists.removeWhere((p) => p.remoteId == remoteId);
-    _playlists.add(playlist);
-    await _persistPlaylists();
-    return playlist;
-  }
-
-  /// Renames a playlist.
-  static Future<void> renamePlaylist(String playlistId, String newName) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1) return;
-    final old = _playlists[idx];
-    _playlists[idx] = Playlist(
-      id: old.id,
-      name: newName.trim().isEmpty ? old.name : newName.trim(),
-      coverUrl: old.coverUrl,
-      remoteId: old.remoteId,
-      isOnline: old.isOnline,
-      lastSyncedAt: old.lastSyncedAt,
-      tracks: old.tracks,
-    );
-    await _persistPlaylists();
-  }
-
-  /// Sets (or clears, with null) a playlist's cover image.
-  static Future<void> setPlaylistCover(String playlistId, String? path) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1) return;
-    final old = _playlists[idx];
-    _playlists[idx] = Playlist(
-      id: old.id,
-      name: old.name,
-      coverUrl: path,
-      remoteId: old.remoteId,
-      isOnline: old.isOnline,
-      lastSyncedAt: old.lastSyncedAt,
-      tracks: old.tracks,
-    );
-    await _persistPlaylists();
-  }
-
-  /// Moves a track within a playlist. Both indices are final positions —
-  /// `onReorderItem` already accounts for the removal, unlike the deprecated
-  /// `onReorder`, whose newIndex needed adjusting by hand.
-  static Future<void> reorderPlaylist(
-      String playlistId, int oldIndex, int newIndex) async {
-    await _ensureLoaded();
-    final pl = _playlists.firstWhere((p) => p.id == playlistId,
-        orElse: () => Playlist(id: '', name: '', tracks: []));
-    if (pl.id.isEmpty) return;
-    _moveWithin(pl.tracks, oldIndex, newIndex);
-    await _persistPlaylists();
-  }
-
-  /// The same, for the 本地 library, which is a list rather than a playlist.
-  static Future<void> reorderDownloaded(int oldIndex, int newIndex) async {
-    await _ensureLoaded();
-    _moveWithin(_downloadedTracks, oldIndex, newIndex);
-    await _persistDownloaded();
-    if (!_libraryUpdateController.isClosed) _libraryUpdateController.add(null);
-  }
-
-  static void _moveWithin(List<Track> list, int oldIndex, int newIndex) {
-    if (oldIndex < 0 || oldIndex >= list.length) return;
-    final track = list.removeAt(oldIndex);
-    list.insert(newIndex.clamp(0, list.length), track);
-  }
-
-  static Future<void> deletePlaylist(String playlistId) async {
-    await _ensureLoaded();
-    if (playlistId == Playlist.favoritesId) return;
-    _playlists.removeWhere((p) => p.id == playlistId);
-    await _persistPlaylists();
-  }
-
-  static Future<void> addTrackToPlaylist(String playlistId, Track track) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1) return;
-    final playlist = _playlists[idx];
-    if (!playlist.tracks.any((t) => t.id == track.id)) {
-      playlist.tracks.insert(0, track);
-      await _persistPlaylists();
-    }
-  }
-
-  static Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1) return;
-    final playlist = _playlists[idx];
-    playlist.tracks.removeWhere((t) => t.id == trackId);
-    await _persistPlaylists();
-  }
-
-  /// Batch variant of [addTrackToPlaylist]: one persist for the whole batch
-  /// instead of a full-file rewrite per track. Order matches calling the
-  /// single-track version repeatedly (each insert goes to the front, so the
-  /// batch's last item ends up first).
-  static Future<void> addTracksToPlaylist(
-      String playlistId, List<Track> tracks) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1 || tracks.isEmpty) return;
-    final playlist = _playlists[idx];
-    final existingIds = playlist.tracks.map((t) => t.id).toSet();
-    final toAdd = <Track>[];
-    for (final track in tracks) {
-      if (!existingIds.contains(track.id)) {
-        existingIds.add(track.id);
-        toAdd.add(track);
-      }
-    }
-    if (toAdd.isEmpty) return;
-    playlist.tracks.insertAll(0, toAdd.reversed.toList());
-    await _persistPlaylists();
-  }
-
-  /// Batch variant of [removeTrackFromPlaylist] — one persist per operation.
-  static Future<void> removeTracksFromPlaylist(
-      String playlistId, List<String> trackIds) async {
-    await _ensureLoaded();
-    final idx = _playlists.indexWhere((p) => p.id == playlistId);
-    if (idx == -1 || trackIds.isEmpty) return;
-    final idSet = trackIds.toSet();
-    final playlist = _playlists[idx];
-    final before = playlist.tracks.length;
-    playlist.tracks.removeWhere((t) => idSet.contains(t.id));
-    if (playlist.tracks.length != before) await _persistPlaylists();
-  }
-
-  static Future<bool> isFavorite(String trackId) async {
-    await _ensureLoaded();
-    final favorites = await getFavoritesPlaylist();
-    return favorites.tracks.any((t) => t.id == trackId);
-  }
-
-  static Future<bool> toggleFavorite(Track track) async {
-    await _ensureLoaded();
-    final favorites = await getFavoritesPlaylist();
-    final exists = favorites.tracks.any((t) => t.id == track.id);
-
-    if (exists) {
-      favorites.tracks.removeWhere((t) => t.id == track.id);
-      await _persistPlaylists();
-      return false;
-    } else {
-      favorites.tracks.insert(0, track);
-      await _persistPlaylists();
-      return true;
-    }
-  }
-
-  /// Records a play. De-duplication is by track **id** (`bvid_cid`) only:
-  /// keying by `bvid` used to collapse the separate parts (P1/P2/…) of one
-  /// video into a single entry, silently dropping tracks from the list.
-  static Future<void> addRecentlyPlayed(Track track) async {
-    await _ensureLoaded();
-    final alreadyFirst =
-        _recentlyPlayed.isNotEmpty && _recentlyPlayed.first.id == track.id;
-    _recentlyPlayed.removeWhere((t) => t.id == track.id);
-    _recentlyPlayed.insert(0, track);
-    if (_recentlyPlayed.length > 50) _recentlyPlayed.removeLast();
-    await _persistRecentlyPlayed();
-    if (!alreadyFirst) _historyUpdateController.add(null);
-  }
-
-  static Future<List<Track>> getRecentlyPlayed() async {
-    await _ensureLoaded();
-    return List<Track>.from(_recentlyPlayed);
-  }
-
-  /// Registers [track] as available offline.
-  ///
-  /// If the library already knows this track, it is left exactly as it is.
-  /// Playback calls this on every start with a possibly stale copy, and
-  /// overwriting here reverted any title/artist/cover the user had edited —
-  /// [updateTrackMetadata] is the only thing allowed to change that.
-  static Future<void> saveDownloadedTrack(Track track) async {
-    await _ensureLoaded();
-    if (_downloadedTracks.any((t) => t.id == track.id)) return;
-    _downloadedTracks.insert(0, track);
-    await _persistDownloaded();
-    if (!_libraryUpdateController.isClosed) _libraryUpdateController.add(null);
-  }
-
-  /// Deletes the local audio for [track] and forgets it from the library,
-  /// playlists and the recently-played rail. (Leaving it in history meant a
-  /// tap on the stale entry silently re-downloaded the song.)
-  static Future<void> removeDownloadedTrack(Track track) async {
-    await _ensureLoaded();
-    await AudioDownloadService.delete(track);
-    _downloadedTracks.removeWhere((t) => t.id == track.id);
-    await _persistDownloaded();
-    for (final pl in _playlists) {
-      pl.tracks.removeWhere((t) => t.id == track.id);
-    }
-    await _persistPlaylists();
-    final removedFromHistory =
-        _recentlyPlayed.where((t) => t.id == track.id).isNotEmpty;
-    _recentlyPlayed.removeWhere((t) => t.id == track.id);
-    if (removedFromHistory) await _persistRecentlyPlayed();
-    if (!_libraryUpdateController.isClosed) _libraryUpdateController.add(null);
-    if (removedFromHistory && !_historyUpdateController.isClosed) {
-      _historyUpdateController.add(null);
-    }
-  }
-
+  static Future<List<Track>> getRecentlyPlayed() async => _tracks(await AppDatabase.instance, 'recently_played');
   static Future<List<Track>> getDownloadedTracks() async {
-    await _ensureLoaded();
-    return List<Track>.from(_downloadedTracks);
+    await AudioDownloadService.reconcileDownloads();
+    return _tracks(await AppDatabase.instance, 'downloaded_tracks');
   }
-
-  static Future<void> cacheLyrics(String trackId, LyricsResult lyrics) async {
-    await _ensureLoaded();
-    // Do not persist "not found" placeholders: they would stick forever and
-    // stop the app from ever retrying a lookup that might succeed later.
-    if (lyrics.source == 'none') {
-      _lyricsCache.remove(trackId);
-      return;
+  static Future<void> addRecentlyPlayed(Track t) => _write((txn) async {
+    final all = await _tracks(txn, 'recently_played');
+    all.removeWhere((item) => item.id == t.id);
+    all.insert(0, t);
+    await _saveOrder(txn, 'recently_played', all.take(50).toList());
+  }, history: true);
+  static Future<void> registerDownload(Track t, int quality, String path, int bytes) => _write((txn) async {
+    await AppDatabase.putTrack(txn, t);
+    await txn.insert('downloads', {'track_id': t.id, 'quality': quality, 'path': path, 'bytes': bytes}, conflictAlgorithm: ConflictAlgorithm.replace);
+    final all = await _tracks(txn, 'downloaded_tracks');
+    if (!all.any((item) => item.id == t.id)) { all.insert(0, t); await _saveOrder(txn, 'downloaded_tracks', all); }
+  }, library: true);
+  static Future<void> reorderDownloaded(int oldIndex, int newIndex) => _write((txn) async {
+    final all = await _tracks(txn, 'downloaded_tracks');
+    _move(all, oldIndex, newIndex);
+    await _saveOrder(txn, 'downloaded_tracks', all);
+  }, library: true);
+  static Future<void> removeDownloadedTrack(Track t) async {
+    await AudioDownloadService.deleteAllForTrack(t);
+    await _write((txn) async {
+      for (final table in ['downloaded_tracks', 'recently_played', 'playlist_tracks']) { await txn.delete(table, where: 'track_id = ?', whereArgs: [t.id]); }
+    }, library: true, history: true);
+  }
+  static Future<void> updateTrackMetadata(Track t) => _write((txn) => AppDatabase.putTrack(txn, t, overwrite: true), library: true, history: true);
+  static Future<List<String>> getSearchHistory() async {
+    final rows = await (await AppDatabase.instance).query('search_history', orderBy: 'position');
+    return rows.map((r) => r['query'] as String).toList();
+  }
+  static Future<List<String>> addSearchHistory(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return getSearchHistory();
+    return _write((txn) async {
+      final rows = await txn.query('search_history', orderBy: 'position');
+      final all = [q, ...rows.map((r) => r['query'] as String).where((s) => s != q)].take(12).toList();
+      await txn.delete('search_history');
+      for (var i = 0; i < all.length; i++) { await txn.insert('search_history', {'query': all[i], 'position': i}); }
+      return all;
+    });
+  }
+  static Future<void> clearSearchHistory() => _write((txn) async { await txn.delete('search_history'); });
+  static Future<void> _putLyrics(DatabaseExecutor db, String id, LyricsResult lyrics) async {
+    final rows = await db.rawQuery('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM lyrics');
+    await db.insert('lyrics', {'track_id': id, 'payload': jsonEncode(lyrics.toMap()), 'position': rows.first['next']}, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+  static Future<void> cacheLyrics(String id, LyricsResult lyrics) => _write((txn) async {
+    if (lyrics.source == 'none') { await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [id]); return; }
+    await _putLyrics(txn, id, lyrics);
+    await txn.rawDelete('DELETE FROM lyrics WHERE track_id IN (SELECT track_id FROM lyrics ORDER BY position DESC LIMIT -1 OFFSET 200)');
+  });
+  static Future<LyricsResult?> getCachedLyrics(String id) async {
+    final rows = await (await AppDatabase.instance).query('lyrics', where: 'track_id = ?', whereArgs: [id]);
+    return rows.isEmpty ? null : LyricsResult.fromMap(AppDatabase.decode(rows.first['payload']));
+  }
+  static Future<void> removeCachedLyrics(String id) => _write((txn) async { await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [id]); });
+  static Future<Map<String, int>> lyricsSizes() async {
+    final rows = await (await AppDatabase.instance).rawQuery('SELECT track_id, length(CAST(payload AS BLOB)) AS bytes FROM lyrics');
+    return {for (final row in rows) row['track_id'] as String: row['bytes'] as int};
+  }
+  static Future<Map<String, LyricsResult>> getManualLyrics(Set<String> ids) async {
+    final rows = await (await AppDatabase.instance).query('lyrics');
+    final result = <String, LyricsResult>{};
+    for (final row in rows) {
+      if (!ids.contains(row['track_id'])) continue;
+      final lyrics = LyricsResult.fromMap(AppDatabase.decode(row['payload']));
+      if (lyrics.isManual) result[row['track_id'] as String] = lyrics;
     }
-    _lyricsCache[trackId] = lyrics;
-    while (_lyricsCache.length > _maxLyricsCacheEntries) {
-      _lyricsCache.remove(_lyricsCache.keys.first);
+    return result;
+  }
+  static Future<void> replacePlaylistsAndManualLyrics({required List<Playlist> playlists, required Map<String, LyricsResult> manualLyrics, Map<String, Track> trackOverrides = const {}, BiliSession? session}) => _write((txn) async {
+    final replacement = List<Playlist>.of(playlists);
+    if (!replacement.any((p) => p.id == Playlist.favoritesId)) replacement.insert(0, Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []));
+    await _savePlaylists(txn, replacement);
+    for (final entry in trackOverrides.entries) {
+      final rows = await txn.query('tracks', where: 'id = ?', whereArgs: [entry.key]);
+      final existing = rows.isEmpty ? entry.value : Track.fromMap(AppDatabase.decode(rows.first['payload']));
+      await AppDatabase.putTrack(txn, existing.copyWith(title: entry.value.title, uploader: entry.value.uploader), overwrite: true);
     }
-    await _persistLyrics();
-  }
-
-  static Future<LyricsResult?> getCachedLyrics(String trackId) async {
-    await _ensureLoaded();
-    return _lyricsCache[trackId];
-  }
-
-  static Future<void> removeCachedLyrics(String trackId) async {
-    await _ensureLoaded();
-    if (_lyricsCache.remove(trackId) != null) await _persistLyrics();
-  }
-
-  static Future<void> _persistLyrics() async {
-    try {
-      final dir = await _docs();
-      final map = _lyricsCache.map((k, v) => MapEntry(k, v.toMap()));
-      await _writeJsonAtomically('$dir/bilibeat_lyrics.json', _envelope(map));
-    } catch (e) {
-      debugPrint('DatabaseService _persistLyrics error: $e');
-    }
-  }
+    for (final entry in manualLyrics.entries) { await _putLyrics(txn, entry.key, entry.value); }
+    if (session != null) await AppDatabase.writeState('session', session.toMap(), executor: txn);
+  }, library: true, history: true);
 }

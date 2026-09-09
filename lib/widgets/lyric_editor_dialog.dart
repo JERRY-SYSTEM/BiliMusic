@@ -69,7 +69,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       final XFile? image = await picker.pickImage(source: ImageSource.gallery);
       if (image != null) {
         final docs = await getApplicationDocumentsDirectory();
-        final coversDir = Directory('${docs.path}/bilibeat_covers');
+        final coversDir = Directory('${docs.path}/bilimusic_covers');
         if (!await coversDir.exists()) {
           await coversDir.create(recursive: true);
         }

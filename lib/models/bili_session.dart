@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 class BiliSession {
   const BiliSession({
     required this.sessData,
@@ -45,11 +43,6 @@ class BiliSession {
         uname: map['uname'] as String?,
         face: map['face'] as String?,
       );
-
-  String encode() => jsonEncode(toMap());
-
-  factory BiliSession.decode(String value) =>
-      BiliSession.fromMap(Map<String, dynamic>.from(jsonDecode(value) as Map));
 
   BiliSession copyWith({int? mid, String? uname, String? face}) => BiliSession(
         sessData: sessData,

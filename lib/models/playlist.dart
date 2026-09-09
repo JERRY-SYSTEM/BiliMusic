@@ -19,8 +19,8 @@ class Playlist {
   final bool isOnline;
   final DateTime? lastSyncedAt;
 
-  /// Mutated in place by the database layer (add/remove/metadata edits), so it
-  /// must always be growable.
+  /// Detached editable snapshot; repository mutations commit separate copies.
+  /// Keep the list growable for UI edits and import preparation.
   final List<Track> tracks;
 
   /// Deliberately NOT const. A const constructor lets `Playlist(tracks: [])` be

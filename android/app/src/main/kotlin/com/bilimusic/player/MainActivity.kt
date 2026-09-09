@@ -1,4 +1,4 @@
-package com.bilibeat.bilibeat
+package com.bilimusic.player
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -13,7 +13,7 @@ class MainActivity : AudioServiceActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "bilibeat/permissions",
+            "bilimusic/permissions",
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestNotifications" -> {

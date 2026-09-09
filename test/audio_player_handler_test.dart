@@ -4,8 +4,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 
-import 'package:bilibeat/models/track.dart';
-import 'package:bilibeat/services/audio_player_handler.dart';
+import 'package:bilimusic/models/track.dart';
+import 'package:bilimusic/services/audio_player_handler.dart';
 
 const first = Track(
   id: 'a', bvid: 'a', cid: 1, title: 'First', rawTitle: 'First',
@@ -118,7 +118,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FakeAudioPlayer player;
-  late BiliBeatAudioHandler handler;
+  late BiliMusicAudioHandler handler;
   late List<String> downloads;
   late Map<String, Completer<String>> pendingDownloads;
 
@@ -126,7 +126,7 @@ void main() {
     player = FakeAudioPlayer();
     downloads = [];
     pendingDownloads = {};
-    handler = BiliBeatAudioHandler(
+    handler = BiliMusicAudioHandler(
       player: player,
       ensureDownloaded: (track) async {
         downloads.add(track.id);
@@ -141,6 +141,25 @@ void main() {
     await handler.clearQueue();
     await handler.persistPlaybackState();
     await player.dispose();
+  });
+
+  test('SQLite queue restores selection without starting native playback', () async {
+    await handler.playTrack(second, newQueue: [first, second]);
+    await handler.pause();
+    player.position = const Duration(seconds: 4);
+    await handler.persistPlaybackState();
+    final restoredPlayer = FakeAudioPlayer();
+    final restored = BiliMusicAudioHandler(player: restoredPlayer,
+        ensureDownloaded: (track) async => '${track.id}.m4a');
+    await restored.restorePersistedQueue();
+    expect(restored.playbackQueue.map((track) => track.id), ['a', 'b']);
+    expect(restored.currentTrack?.id, 'b');
+    expect(restored.currentQueueIndex, 1);
+    expect(restoredPlayer.source, isNull);
+    expect(restoredPlayer.playing, isFalse);
+    await restored.clearQueue();
+    await restored.persistPlaybackState();
+    await restoredPlayer.dispose();
   });
 
   test('long automatic playback bounds native sources and preserves order', () async {
