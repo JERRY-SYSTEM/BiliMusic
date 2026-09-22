@@ -75,8 +75,16 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
   void _changed() { if (mounted) setState(() {}); }
   @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('外观设置')), body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
     Text('主题模式', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-    Card(clipBehavior: Clip.antiAlias, child: Column(children: ['system', 'light', 'dark'].map((mode) => RadioListTile<String>(value: mode, groupValue: settings.themeMode, title: Text({'system':'跟随系统','light':'浅色','dark':'深色'}[mode]!), subtitle: Text({'system':'根据系统明暗自动切换','light':'始终使用浅色','dark':'始终使用深色'}[mode]!), onChanged: (v) { if (v != null) settings.setThemeMode(v); })).toList())),
+    Card(clipBehavior: Clip.antiAlias, child: RadioGroup<String>(
+      groupValue: settings.themeMode,
+      onChanged: (v) { if (v != null) settings.setThemeMode(v); },
+      child: Column(children: ['system', 'light', 'dark'].map((mode) => RadioListTile<String>(
+        value: mode,
+        title: Text({'system':'跟随系统','light':'浅色','dark':'深色'}[mode]!),
+        subtitle: Text({'system':'根据系统明暗自动切换','light':'始终使用浅色','dark':'始终使用深色'}[mode]!),
+      )).toList()),
+    )),
     const SizedBox(height: 24), Text('主题颜色', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-    Card(child: Padding(padding: const EdgeInsets.all(16), child: Wrap(spacing: 18, runSpacing: 12, children: colors.map((color) => IconButton(onPressed: () => settings.setAccentValue(color.value), tooltip: '选择主题色', icon: Container(width: 30, height: 30, decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: settings.accentValue == color.value ? const [BoxShadow(blurRadius: 8)] : null)))).toList()))),
+    Card(child: Padding(padding: const EdgeInsets.all(16), child: Wrap(spacing: 18, runSpacing: 12, children: colors.map((color) => IconButton(onPressed: () => settings.setAccentValue(color.toARGB32()), tooltip: '选择主题色', icon: Container(width: 30, height: 30, decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: settings.accentValue == color.toARGB32() ? const [BoxShadow(blurRadius: 8)] : null)))).toList()))),
   ]));
 }

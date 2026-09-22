@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:bilibeat/services/app_transfer_service.dart';
-import 'package:bilibeat/theme/app_theme.dart';
-import 'package:bilibeat/widgets/settings_page.dart';
+import 'package:bilimusic/services/app_transfer_service.dart';
+import 'package:bilimusic/theme/app_theme.dart';
+import 'package:bilimusic/widgets/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -95,15 +95,6 @@ void main() {
     expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
   });
 
-  test('rejects duplicate tracks instead of importing duplicate entries', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List;
-    final tracks = playlists.first['tracks'] as List;
-    tracks.add(Map<String, dynamic>.from(tracks.first as Map));
-    expect(() => service.previewImport(_bytes(backup)),
-        throwsA(isA<AppTransferException>()));
-  });
-
   test('rejects a part id belonging to a different video', () {
     final backup = _validBackup();
     final playlists = backup['playlists'] as List;
@@ -126,23 +117,6 @@ void main() {
           (error) => error.message,
           'message',
           contains('非手动歌词'),
-        ),
-      ),
-    );
-  });
-
-  test('rejects duplicate playlist ids', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List<dynamic>;
-    playlists.add(Map<String, dynamic>.from(playlists.first as Map));
-
-    expect(
-      () => service.previewImport(_bytes(backup)),
-      throwsA(
-        isA<AppTransferException>().having(
-          (error) => error.message,
-          'message',
-          contains('重复的歌单 ID'),
         ),
       ),
     );

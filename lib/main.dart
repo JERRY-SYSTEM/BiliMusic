@@ -32,7 +32,7 @@ import 'widgets/settings_page.dart';
 
 import 'package:audio_service/audio_service.dart';
 
-BiliBeatAudioHandler? _audioHandlerInstance;
+BiliMusicAudioHandler? _audioHandlerInstance;
 
 /// Adapts a [PageController] — a Listenable whose `page` is null until the
 /// first frame — into the [Animation] [SegmentTabs] drives its pill with.
@@ -76,7 +76,7 @@ class _PageFraction extends Animation<double> with ChangeNotifier {
 /// [main] has initialised it is a programming error — lazily constructing a
 /// second handler here would silently detach playback from the OS media
 /// session, so we fail loudly instead.
-BiliBeatAudioHandler get audioHandlerInstance {
+BiliMusicAudioHandler get audioHandlerInstance {
   final handler = _audioHandlerInstance;
   assert(handler != null, 'audioHandlerInstance read before AudioService.init');
   return handler!;
@@ -101,11 +101,13 @@ void main() async {
     systemNavigationBarContrastEnforced: false,
   ));
   _audioHandlerInstance = await AudioService.init(
-    builder: BiliBeatAudioHandler.new,
+    builder: BiliMusicAudioHandler.new,
     config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.bilibeat.channel.audio',
-      androidNotificationChannelName: 'BiliBeat',
+      androidNotificationChannelId: 'com.bilimusic.player.audio',
+      androidNotificationChannelName: 'BiliMusic',
       androidNotificationOngoing: true,
+      artDownscaleWidth: 512,
+      artDownscaleHeight: 512,
     ),
   );
   await _audioHandlerInstance!.restorePersistedQueue();
@@ -114,16 +116,16 @@ void main() async {
   // session notification, so the answer is "no" on most devices and that is
   // fine either way.
   if (!kIsWeb && Platform.isAndroid) {
-    const channel = MethodChannel('bilibeat/permissions');
+    const channel = MethodChannel('bilimusic/permissions');
     try {
       await channel.invokeMethod('requestNotifications');
     } catch (_) {}
   }
-  runApp(const BiliBeatApp());
+  runApp(const BiliMusicApp());
 }
 
-class BiliBeatApp extends StatelessWidget {
-  const BiliBeatApp({super.key});
+class BiliMusicApp extends StatelessWidget {
+  const BiliMusicApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -131,7 +133,7 @@ class BiliBeatApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: settings,
       builder: (context, _) => MaterialApp(
-        title: 'BiliBeat',
+        title: 'BiliMusic',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.build(ThemeMode.light, Color(settings.accentValue)),
         darkTheme: AppTheme.build(ThemeMode.dark, Color(settings.accentValue)),
@@ -152,7 +154,7 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _activeTabIndex = 0;
-  late final BiliBeatAudioHandler _audioHandler = audioHandlerInstance;
+  late final BiliMusicAudioHandler _audioHandler = audioHandlerInstance;
 
   /// Player state is held in notifiers, not State fields. It changes on every
   /// play/pause and every track advance, and as plain `setState` state it
@@ -218,7 +220,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      unawaited(_audioHandler.persistPlaybackState());
+      unawaited(_audioHandler.persistPlaybackState().catchError((Object e) {
+        debugPrint('Playback queue persist failed: $e');
+      }));
     }
   }
 
@@ -305,30 +309,6 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
       setState(() => _activePlaylistSheet = null);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('在线歌单同步完成')));
     }
-  }
-
-  Future<ImportDestination?> _showImportDestination() async {
-    final playlists = (await DatabaseService.getPlaylists()).where((p) => p.id != Playlist.favoritesId).toList();
-    final nameController = TextEditingController();
-    String? existingId;
-    bool createNew = true;
-    final result = await showDialog<ImportDestination>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: context.palette.backgroundElevated,
-          title: Text('选择导入目标', style: TextStyle(color: context.palette.textPrimary)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          RadioListTile<bool>(value: true, groupValue: createNew, onChanged: (v) => setDialogState(() => createNew = true), title: const Text('新建本地歌单')),
-          if (createNew) TextField(controller: nameController, decoration: const InputDecoration(hintText: '歌单名称')),
-          RadioListTile<bool>(value: false, groupValue: createNew, onChanged: playlists.isEmpty ? null : (v) => setDialogState(() { createNew = false; existingId ??= playlists.first.id; }), title: const Text('添加到已有歌单')),
-          if (!createNew && playlists.isNotEmpty) DropdownButton<String>(value: existingId ?? playlists.first.id, isExpanded: true, items: playlists.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))).toList(), onChanged: (v) => setDialogState(() => existingId = v)),
-          if (!createNew && playlists.isEmpty) const Text('暂无可用本地歌单'),
-        ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), TextButton(onPressed: !createNew && playlists.isEmpty ? null : () => Navigator.pop(ctx, createNew ? ImportDestination.newPlaylist(nameController.text.trim()) : ImportDestination.existing(existingId!)), child: Text('导入', style: TextStyle(color: ctx.palette.accent)))],
-      )),
-    );
-    nameController.dispose();
-    return result;
   }
 
   void _initListeners() {

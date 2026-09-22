@@ -84,8 +84,11 @@ class PlayerQueueManager {
   void remove(String id) {
     _order.remove(id);
     _history.removeWhere((item) => item == id);
-    if (_order.isEmpty) _cursor = null;
-    else if (_cursor != null && _cursor! >= _order.length) _cursor = _order.length - 1;
+    if (_order.isEmpty) {
+      _cursor = null;
+    } else if (_cursor != null && _cursor! >= _order.length) {
+      _cursor = _order.length - 1;
+    }
   }
 
   void prioritizeNext({

@@ -352,7 +352,7 @@ class _SearchScreenState extends State<SearchScreen> {
         _hasSearched ? _searchResults.isNotEmpty : _recommendedTracks.isNotEmpty;
     if (_isLoadingMore) {
       return Padding(
-        padding: EdgeInsets.symmetric(vertical: 22),
+        padding: const EdgeInsets.symmetric(vertical: 22),
         child: Center(
           child: SizedBox(
             width: 22,
@@ -365,7 +365,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     if (reachedEnd && hasContent) {
       return Padding(
-        padding: EdgeInsets.symmetric(vertical: 22),
+        padding: const EdgeInsets.symmetric(vertical: 22),
         child: Center(
           child: Text('没有更多了',
               style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
@@ -376,7 +376,7 @@ class _SearchScreenState extends State<SearchScreen> {
       final loadFailed = _hasSearched ? _searchLoadFailed : _recLoadFailed;
       if (loadFailed) {
         return Padding(
-          padding: EdgeInsets.symmetric(vertical: 22),
+          padding: const EdgeInsets.symmetric(vertical: 22),
           child: Center(
             child: Text('加载失败，上滑重试',
                 style: TextStyle(color: context.palette.textFaint, fontSize: 12)),
@@ -569,7 +569,7 @@ class _SearchScreenState extends State<SearchScreen> {
           Row(
             children: [
               Icon(Icons.auto_awesome, color: context.palette.accent, size: 20),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Text(
                 '推荐',
                 style: TextStyle(color: context.palette.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),

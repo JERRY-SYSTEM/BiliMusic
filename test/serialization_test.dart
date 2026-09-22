@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bilibeat/models/lyric_line.dart';
-import 'package:bilibeat/models/playlist.dart';
-import 'package:bilibeat/models/track.dart';
+import 'package:bilimusic/models/lyric_line.dart';
+import 'package:bilimusic/models/playlist.dart';
+import 'package:bilimusic/models/track.dart';
 
 /// Round-trips through the same jsonEncode/jsonDecode the database layer
 /// uses, so a field that survives toMap/fromMap but not JSON (e.g. a non-
@@ -103,7 +103,7 @@ void main() {
         tracks: [_track(), _track(id: 'BV1_p2')],
       );
 
-      // Serialised exactly the way DatabaseService._persistPlaylists does it.
+      // Playlist metadata and members can be mapped independently.
       final map = pl.toMap();
       map['tracks'] = pl.tracks.map((t) => t.toMap()).toList();
       final decoded = throughJson(map);

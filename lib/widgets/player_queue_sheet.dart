@@ -9,7 +9,7 @@ import 'cached_cover_image.dart';
 
   Future<void> showPlayerQueueSheet({
     required BuildContext context,
-    required BiliBeatAudioHandler handler,
+    required BiliMusicAudioHandler handler,
     VoidCallback? onQueueCleared,
 }) {
   return showModalBottomSheet<void>(
@@ -33,7 +33,7 @@ class PlayerQueueSheet extends StatelessWidget {
     this.onQueueCleared,
   });
 
-  final BiliBeatAudioHandler handler;
+  final BiliMusicAudioHandler handler;
   final VoidCallback? onQueueCleared;
 
   @override

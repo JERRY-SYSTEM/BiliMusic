@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bilibeat/models/track.dart';
-import 'package:bilibeat/services/player_queue_manager.dart';
+import 'package:bilimusic/models/track.dart';
+import 'package:bilimusic/services/player_queue_manager.dart';
 
 Track _track(String id) => Track(
       id: id,

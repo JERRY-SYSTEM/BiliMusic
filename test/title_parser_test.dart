@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bilibeat/services/lyrics_engine.dart';
+import 'package:bilimusic/services/lyrics_engine.dart';
 
 void main() {
   test('LyricsEngine.cleanTitle survives all 540 fixture Bilibili titles', () async {

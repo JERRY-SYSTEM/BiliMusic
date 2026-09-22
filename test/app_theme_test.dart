@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:bilibeat/theme/app_theme.dart';
+import 'package:bilimusic/theme/app_theme.dart';
 
 void main() {
   test('light palette follows the selected accent and uses light surfaces', () {

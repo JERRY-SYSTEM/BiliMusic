@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../models/bili_session.dart';
+import '../models/bili_favorite_collection.dart';
 import '../models/lyric_line.dart';
 import '../models/playlist.dart';
 import '../models/track.dart';
@@ -78,19 +79,25 @@ class AppImportResult {
 }
 
 class AppTransferService {
-  const AppTransferService();
+  const AppTransferService({BiliAuthController? auth, this.fetchVideoInfo, this.fetchOnlineTracks, this.fetchCollections}) : _authOverride = auth;
+
+  final BiliAuthController? _authOverride;
+  BiliAuthController get _auth => _authOverride ?? BiliAuthController.instance;
+  final Future<List<Track>> Function(String)? fetchVideoInfo;
+  final Future<List<Track>> Function(BiliSession, String)? fetchOnlineTracks;
+  final Future<List<BiliFavoriteCollection>> Function(BiliSession)? fetchCollections;
 
   static const int schemaVersion = 1;
 
   Future<String> buildExportJson() async {
-    await BiliAuthController.instance.initialize();
+    await _auth.initialize();
     final playlists = await DatabaseService.getPlaylists();
     final referencedIds = playlists
         .expand((playlist) => playlist.tracks)
         .map((track) => track.id)
         .toSet();
     final manualLyrics = await DatabaseService.getManualLyrics(referencedIds);
-    final session = BiliAuthController.instance.session;
+    final session = _auth.session;
     final bundle = <String, dynamic>{
       'schemaVersion': schemaVersion,
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
@@ -130,13 +137,13 @@ class AppTransferService {
     required Uint8List bytes,
     required AppImportSelection selection,
   }) async {
-    await BiliAuthController.instance.initialize();
+    await _auth.initialize();
     final bundle = _parse(bytes);
     final current = (await DatabaseService.getPlaylists())
         .map(_copyPlaylist)
         .toList();
     final selectedSession = selection.importSession ? bundle.session : null;
-    final syncSession = selectedSession ?? BiliAuthController.instance.session;
+    final syncSession = selectedSession ?? _auth.session;
     final existingTracks = <String, Track>{
       for (final playlist in current)
         for (final track in playlist.tracks) track.id: track,
@@ -190,13 +197,13 @@ class AppTransferService {
             syncSession.isLoggedIn &&
             backupPlaylist.remoteId != null) {
           try {
-            cloudTracks = await BiliFavoritesService.fetchTracks(
+            cloudTracks = await (fetchOnlineTracks ?? BiliFavoritesService.fetchTracks)(
               syncSession,
               backupPlaylist.remoteId!,
             );
             try {
               final collections =
-                  await BiliFavoritesService.fetchCollections(syncSession);
+                  await (fetchCollections ?? BiliFavoritesService.fetchCollections)(syncSession);
               for (final collection in collections) {
                 if (collection.id == backupPlaylist.remoteId) {
                   importedName = collection.name;
@@ -325,9 +332,10 @@ class AppTransferService {
       playlists: current,
       manualLyrics: selectedManualLyrics,
       trackOverrides: trackOverrides,
+      session: selectedSession,
     );
     if (selectedSession != null) {
-      await BiliAuthController.instance.importSession(selectedSession);
+      _auth.acceptCommittedSession(selectedSession);
     }
     return AppImportResult(
       playlistCount: playlistCount,
@@ -339,7 +347,7 @@ class AppTransferService {
 
   Future<Track?> _fetchTrack(_BackupTrack reference) async {
     try {
-      final candidates = await BilibiliSdk.fetchVideoInfo(reference.bvid);
+      final candidates = await (fetchVideoInfo ?? BilibiliSdk.fetchVideoInfo)(reference.bvid);
       Track? details;
       for (final candidate in candidates) {
         if (candidate.id == reference.id) {
@@ -394,7 +402,7 @@ class AppTransferService {
         throw const AppTransferException('备份文件缺少有效的版本信息');
       }
       if (version > schemaVersion) {
-        throw const AppTransferException('备份由更新版本的 BiliBeat 创建，当前版本无法导入');
+        throw const AppTransferException('备份由更新版本的 BiliMusic 创建，当前版本无法导入');
       }
       final exportedAt = json['exportedAt'];
       if (exportedAt is! String || DateTime.tryParse(exportedAt) == null) {

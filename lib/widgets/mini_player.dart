@@ -116,11 +116,11 @@ class MiniPlayer extends StatelessWidget {
 
   Widget _emptyState(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          _EmptyArt(),
-          SizedBox(width: 12),
+          const _EmptyArt(),
+          const SizedBox(width: 12),
           Expanded(
             child: Text('选一首歌开始播放',
                 style: TextStyle(
@@ -267,7 +267,7 @@ class MiniPlayer extends StatelessWidget {
                 BoxShadow(
                     color: context.palette.accent30,
                     blurRadius: 14,
-                    offset: Offset(0, 4)),
+                    offset: const Offset(0, 4)),
               ],
             ),
             child: AnimatedSwitcher(

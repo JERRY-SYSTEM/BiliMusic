@@ -184,8 +184,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         height: MediaQuery.of(context).size.height * 0.76,
         decoration: BoxDecoration(
           color: context.palette.surfaceDeep,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          boxShadow: [
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          boxShadow: const [
             BoxShadow(
               color: AppColors.black50,
               blurRadius: 24,
@@ -311,7 +311,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                       icon: HugeIcon(icon: _currentPlaylist.isOnline
                           ? HugeIcons.strokeRoundedRefreshDot
                           : HugeIcons.strokeRoundedAdd01,
-                          color: context.palette.textSecondary, size: 24),
+                          color: context.palette.textSecondary),
                       tooltip: _currentPlaylist.isOnline ? '同步在线歌单' : '添加本地曲目',
                       onPressed: _currentPlaylist.isOnline
                           ? () => widget.onSyncOnline?.call(_currentPlaylist)
@@ -598,7 +598,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         color: AppColors.danger.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: HugeIcon(
+      child: const HugeIcon(
         icon: HugeIcons.strokeRoundedDelete02,
         color: AppColors.danger,
       ),
@@ -655,7 +655,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
           await ImagePicker().pickImage(source: ImageSource.gallery);
       if (image == null) return;
       final docs = await getApplicationDocumentsDirectory();
-      final dir = Directory('${docs.path}/bilibeat_covers');
+      final dir = Directory('${docs.path}/bilimusic_covers');
       if (!await dir.exists()) await dir.create(recursive: true);
       final ext = image.path.split('.').last;
       final saved = File(

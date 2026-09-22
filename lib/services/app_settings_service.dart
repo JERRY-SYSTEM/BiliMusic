@@ -1,62 +1,58 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'app_database.dart';
 
 class AppSettingsService extends ChangeNotifier {
   AppSettingsService._();
+  @visibleForTesting
+  AppSettingsService.forTesting();
   static final AppSettingsService instance = AppSettingsService._();
 
-  static const _fileName = 'bilibeat_settings.json';
   String themeMode = 'dark';
   int accentValue = 0xFFFF3366;
   int defaultAudioQuality = 30280;
-  bool _loaded = false;
+  Future<void>? _initializing;
+  Future<void> _pending = Future.value();
 
-  Future<void> initialize() async {
-    if (_loaded) return;
-    _loaded = true;
+  Future<void> initialize() => _initializing ??= _load();
+  Future<void> _load() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/$_fileName');
-      if (await file.exists()) {
-        final map = jsonDecode(await file.readAsString()) as Map;
+      final map = await AppDatabase.readState('settings');
+      if (map != null) {
         themeMode = map['themeMode'] as String? ?? themeMode;
         accentValue = (map['accentValue'] as num?)?.toInt() ?? accentValue;
         defaultAudioQuality =
             (map['defaultAudioQuality'] as num?)?.toInt() ?? defaultAudioQuality;
       }
-    } catch (e) {
-      debugPrint('settings restore failed: $e');
+    } catch (_) {
+      _initializing = null;
+      rethrow;
     }
     notifyListeners();
   }
 
-  Future<void> _save() async {
-    final dir = await getApplicationDocumentsDirectory();
-    await File('${dir.path}/$_fileName').writeAsString(jsonEncode({
-      'themeMode': themeMode,
-      'accentValue': accentValue,
-      'defaultAudioQuality': defaultAudioQuality,
-    }));
+  Future<void> _save(String key, Object value) {
+    final operation = _pending.then((_) async {
+      await initialize();
+      final map = <String, dynamic>{'themeMode': themeMode, 'accentValue': accentValue, 'defaultAudioQuality': defaultAudioQuality, key: value};
+      await AppDatabase.writeState('settings', map);
+      themeMode = map['themeMode'] as String;
+      accentValue = map['accentValue'] as int;
+      defaultAudioQuality = map['defaultAudioQuality'] as int;
+      notifyListeners();
+    });
+    _pending = operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return operation;
   }
 
   Future<void> setThemeMode(String value) async {
-    themeMode = value;
-    notifyListeners();
-    await _save();
+    await _save('themeMode', value);
   }
 
   Future<void> setAccentValue(int value) async {
-    accentValue = value;
-    notifyListeners();
-    await _save();
+    await _save('accentValue', value);
   }
 
   Future<void> setDefaultAudioQuality(int value) async {
-    defaultAudioQuality = value;
-    notifyListeners();
-    await _save();
+    await _save('defaultAudioQuality', value);
   }
 }

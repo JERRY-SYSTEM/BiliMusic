@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Nothing in BiliBeat is worth restoring: downloads are re-downloaded and
+<!-- Nothing in BiliMusic is worth restoring: downloads are re-downloaded and
      playlists re-created by hand. Opt everything out so no cached audio or
      credentials ever leak through a device-to-device migration. -->
 <data-extraction-rules>
