@@ -200,6 +200,16 @@ class LyricsEngine {
     }
   }
 
+  static Future<LyricsResult?> fetchReferenceLyrics(LyricsReference reference) {
+    return fetchCandidateLyrics(LyricSearchCandidate(
+      id: reference.id,
+      title: reference.title ?? '',
+      artist: reference.artist ?? '',
+      provider: reference.provider,
+      pictureUrl: reference.pictureUrl,
+    ));
+  }
+
   static LyricsResult? _resultFromRawLyrics(
     LyricSearchCandidate candidate,
     String rawLyrics,
@@ -231,7 +241,7 @@ class LyricsEngine {
       songTitle: candidate.title,
       artistName: candidate.artist,
       lines: lines,
-      isManual: true,
+      reference: candidate.reference,
     );
   }
 

@@ -162,35 +162,51 @@ class DatabaseService {
     });
   }
   static Future<void> clearSearchHistory() => _write((txn) async { await txn.delete('search_history'); });
-  static Future<void> _putLyrics(DatabaseExecutor db, String id, LyricsResult lyrics) async {
-    final rows = await db.rawQuery('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM lyrics');
-    await db.insert('lyrics', {'track_id': id, 'payload': jsonEncode(lyrics.toMap()), 'position': rows.first['next']}, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-  static Future<void> cacheLyrics(String id, LyricsResult lyrics) => _write((txn) async {
-    if (lyrics.source == 'none') { await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [id]); return; }
-    await _putLyrics(txn, id, lyrics);
-    await txn.rawDelete('DELETE FROM lyrics WHERE track_id IN (SELECT track_id FROM lyrics ORDER BY position DESC LIMIT -1 OFFSET 200)');
+  static Future<void> saveLyricsReference(String trackId, LyricsReference reference) => _write((txn) async {
+    await txn.insert('lyrics', {
+      'track_id': trackId,
+      'provider': reference.provider.apiName,
+      'lyric_id': reference.id,
+      'title': reference.title,
+      'artist': reference.artist,
+      'picture_url': reference.pictureUrl,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   });
-  static Future<LyricsResult?> getCachedLyrics(String id) async {
+
+  static Future<LyricsReference?> getLyricsReference(String id) async {
     final rows = await (await AppDatabase.instance).query('lyrics', where: 'track_id = ?', whereArgs: [id]);
-    return rows.isEmpty ? null : LyricsResult.fromMap(AppDatabase.decode(rows.first['payload']));
+    if (rows.isEmpty) return null;
+    return LyricsReference.fromMap({
+      'provider': rows.first['provider'],
+      'id': rows.first['lyric_id'],
+      'title': rows.first['title'],
+      'artist': rows.first['artist'],
+      'pictureUrl': rows.first['picture_url'],
+    });
+  }
+
+  static Future<double> getLyricsOffset(String id) async {
+    final rows = await (await AppDatabase.instance).query('lyrics', columns: ['offset_ms'], where: 'track_id = ?', whereArgs: [id]);
+    return rows.isEmpty ? 0 : ((rows.first['offset_ms'] as int?) ?? 0) / 1000;
+  }
+
+  static Future<void> adjustLyricsOffset(String id, double delta) => _write((txn) async {
+    final rows = await txn.query('lyrics', columns: ['offset_ms'], where: 'track_id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final current = (rows.first['offset_ms'] as int?) ?? 0;
+    await txn.update('lyrics', {'offset_ms': current + (delta * 1000).round()}, where: 'track_id = ?', whereArgs: [id]);
+  });
+
+  static Future<Map<String, dynamic>?> getLyricsSelection(String id) async {
+    final rows = await (await AppDatabase.instance).query('lyrics', where: 'track_id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return null;
+    return {
+      'reference': LyricsReference.fromMap({'provider': rows.first['provider'], 'id': rows.first['lyric_id'], 'title': rows.first['title'], 'artist': rows.first['artist'], 'pictureUrl': rows.first['picture_url']}).toMap(),
+      'offset': ((rows.first['offset_ms'] as int?) ?? 0) / 1000,
+    };
   }
   static Future<void> removeCachedLyrics(String id) => _write((txn) async { await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [id]); });
-  static Future<Map<String, int>> lyricsSizes() async {
-    final rows = await (await AppDatabase.instance).rawQuery('SELECT track_id, length(CAST(payload AS BLOB)) AS bytes FROM lyrics');
-    return {for (final row in rows) row['track_id'] as String: row['bytes'] as int};
-  }
-  static Future<Map<String, LyricsResult>> getManualLyrics(Set<String> ids) async {
-    final rows = await (await AppDatabase.instance).query('lyrics');
-    final result = <String, LyricsResult>{};
-    for (final row in rows) {
-      if (!ids.contains(row['track_id'])) continue;
-      final lyrics = LyricsResult.fromMap(AppDatabase.decode(row['payload']));
-      if (lyrics.isManual) result[row['track_id'] as String] = lyrics;
-    }
-    return result;
-  }
-  static Future<void> replacePlaylistsAndManualLyrics({required List<Playlist> playlists, required Map<String, LyricsResult> manualLyrics, Map<String, Track> trackOverrides = const {}, BiliSession? session}) => _write((txn) async {
+  static Future<void> replacePlaylistsAndLyrics({required List<Playlist> playlists, required Map<String, Map<String, dynamic>> lyrics, Map<String, Track> trackOverrides = const {}, BiliSession? session}) => _write((txn) async {
     final replacement = List<Playlist>.of(playlists);
     if (!replacement.any((p) => p.id == Playlist.favoritesId)) replacement.insert(0, Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []));
     await _savePlaylists(txn, replacement);
@@ -199,7 +215,10 @@ class DatabaseService {
       final existing = rows.isEmpty ? entry.value : Track.fromMap(AppDatabase.decode(rows.first['payload']));
       await AppDatabase.putTrack(txn, existing.copyWith(title: entry.value.title, uploader: entry.value.uploader), overwrite: true);
     }
-    for (final entry in manualLyrics.entries) { await _putLyrics(txn, entry.key, entry.value); }
+    for (final entry in lyrics.entries) {
+      final reference = LyricsReference.fromMap(Map<String, dynamic>.from(entry.value['reference'] as Map));
+      await txn.insert('lyrics', {'track_id': entry.key, 'provider': reference.provider.apiName, 'lyric_id': reference.id, 'title': reference.title, 'artist': reference.artist, 'picture_url': reference.pictureUrl, 'offset_ms': (((entry.value['offset'] as num?) ?? 0) * 1000).round()}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
     if (session != null) await AppDatabase.writeState('session', session.toMap(), executor: txn);
   }, library: true, history: true);
 }

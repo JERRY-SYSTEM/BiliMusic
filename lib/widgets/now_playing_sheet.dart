@@ -30,6 +30,8 @@ class NowPlayingSheet extends StatefulWidget {
   final ValueNotifier<Duration> positionNotifier;
   final ValueNotifier<Duration> durationNotifier;
   final ValueNotifier<List<LyricLine>> lyricsNotifier;
+  final ValueNotifier<double> lyricsOffsetNotifier;
+  final ValueNotifier<bool> hasLyricsReferenceNotifier;
 
   /// Set when the sheet is opened as part of "play this now". The handler has
   /// not switched track yet at that instant, so it cannot be inferred — and
@@ -45,6 +47,8 @@ class NowPlayingSheet extends StatefulWidget {
     required this.positionNotifier,
     required this.durationNotifier,
     required this.lyricsNotifier,
+    required this.lyricsOffsetNotifier,
+    required this.hasLyricsReferenceNotifier,
     this.followHandler = false,
     this.onQueueCleared,
   });
@@ -389,7 +393,11 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
           if (widget.handler.currentTrack?.id == track.id) {
             widget.lyricsNotifier.value = result.lines;
           }
-          await DatabaseService.cacheLyrics(track.id, result);
+          final reference = result.reference;
+          if (reference != null) {
+            await DatabaseService.saveLyricsReference(track.id, reference);
+            widget.hasLyricsReferenceNotifier.value = true;
+          }
         },
       );
     } finally {
@@ -609,21 +617,27 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
         Expanded(
           child: ValueListenableBuilder<List<LyricLine>>(
             valueListenable: widget.lyricsNotifier,
-            builder: (context, lines, _) => SyncedLyricsView(
-              lines: _isActive ? lines : const [],
-              positionNotifier: widget.positionNotifier,
-              showTranslation: _showTranslation,
-              onSeek: _isActive
-                  ? (seconds) => widget.handler.seek(
-                        Duration(milliseconds: (seconds * 1000).round()),
-                      )
-                  : null,
+            builder: (context, lines, _) => ValueListenableBuilder<double>(
+              valueListenable: widget.lyricsOffsetNotifier,
+              builder: (context, offset, _) => SyncedLyricsView(
+                lines: _isActive ? lines : const [],
+                positionNotifier: widget.positionNotifier,
+                showTranslation: _showTranslation,
+                offset: offset,
+                onSeek: _isActive
+                    ? (seconds) => widget.handler.seek(
+                          Duration(milliseconds: (seconds * 1000).round()),
+                        )
+                    : null,
+              ),
             ),
           ),
         ),
         ValueListenableBuilder<List<LyricLine>>(
           valueListenable: widget.lyricsNotifier,
-          builder: (context, lines, _) {
+          builder: (context, lines, _) => ValueListenableBuilder<bool>(
+            valueListenable: widget.hasLyricsReferenceNotifier,
+            builder: (context, hasReference, _) {
             final hasTranslation = lines.any(
               (line) => (line.translation ?? '').trim().isNotEmpty,
             );
@@ -637,6 +651,20 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                     color: context.palette.accent,
                     onPressed: _openLyricSearch,
                     icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
+                  ),
+                  IconButton(
+                    key: const Key('lyricOffsetBackwardButton'),
+                    tooltip: '歌词提前 0.5 秒',
+                    color: context.palette.accent,
+                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
+                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft),
+                  ),
+                  IconButton(
+                    key: const Key('lyricOffsetForwardButton'),
+                    tooltip: '歌词延后 0.5 秒',
+                    color: context.palette.accent,
+                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
+                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight),
                   ),
                   if (hasTranslation) ...[
                     const SizedBox(width: 20),
@@ -654,10 +682,18 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 ],
               ),
             );
-          },
+            },
+          ),
         ),
       ],
     );
+  }
+
+  Future<void> _adjustLyricsOffset(double delta) async {
+    if (!_isActive) return;
+    Haptics.selection();
+    widget.lyricsOffsetNotifier.value += delta;
+    await DatabaseService.adjustLyricsOffset(_displayTrack.id, delta);
   }
 
   String _formatPublishTime(int? seconds) {

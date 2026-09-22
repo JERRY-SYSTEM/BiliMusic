@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart';
 import '../models/track.dart';
 import '../widgets/cached_cover_image.dart';
 import 'app_database.dart';
-import 'database_service.dart';
 
 /// A user-facing cache bucket. A bucket contains every cache artifact that can
 /// be confidently attributed to one song; everything else is [other].
@@ -45,12 +44,6 @@ class CacheInventory {
         final bucket = buckets[audioOwners[entity.path]];
         (bucket?.files ?? otherFiles).add(entity);
       }
-    }
-    final lyricsSizes = await DatabaseService.lyricsSizes();
-    for (final entry in lyricsSizes.entries) {
-      final bucket = buckets[entry.key];
-      if (bucket == null) { otherBytes += entry.value; otherLyrics.add(entry.key); }
-      else { buckets[entry.key] = CacheBucket(track: bucket.track, files: bucket.files, lyricsBytes: entry.value); }
     }
     final coversDir = Directory('${support.path}/bilimusic_covers');
     if (await coversDir.exists()) {

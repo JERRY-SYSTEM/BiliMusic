@@ -43,15 +43,10 @@ Map<String, dynamic> _validBackup() => {
           'tracks': [],
         },
       ],
-      'manualLyrics': {
+      'lyrics': {
         'BV1test_p1': {
-          'source': 'user',
-          'songTitle': '自定义歌名',
-          'artistName': '自定义歌手',
-          'lines': [
-            {'time': 0.0, 'text': '手动歌词', 'translation': null},
-          ],
-          'isManual': true,
+          'reference': {'provider': 'netease', 'id': '123', 'title': '歌'},
+          'offset': 0.5,
         },
       },
     };
@@ -104,11 +99,11 @@ void main() {
         throwsA(isA<AppTransferException>()));
   });
 
-  test('rejects non-manual lyrics in a backup', () {
+  test('rejects invalid lyric references in a backup', () {
     final backup = _validBackup();
-    final lyrics = backup['manualLyrics'] as Map<String, dynamic>;
+    final lyrics = backup['lyrics'] as Map<String, dynamic>;
     final entry = lyrics['BV1test_p1'] as Map<String, dynamic>;
-    entry['isManual'] = false;
+    entry['reference'] = {'provider': 'netease'};
 
     expect(
       () => service.previewImport(_bytes(backup)),
@@ -116,7 +111,7 @@ void main() {
         isA<AppTransferException>().having(
           (error) => error.message,
           'message',
-          contains('非手动歌词'),
+          contains('歌词标识无效'),
         ),
       ),
     );

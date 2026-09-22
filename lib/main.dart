@@ -171,6 +171,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   final ValueNotifier<Duration> _durationNotifier =
       ValueNotifier(Duration.zero);
   final ValueNotifier<List<LyricLine>> _lyricsNotifier = ValueNotifier([]);
+  final ValueNotifier<double> _lyricsOffsetNotifier = ValueNotifier(0);
+  final ValueNotifier<bool> _hasLyricsReferenceNotifier = ValueNotifier(false);
   /// Also a notifier, and for the same reason as the player state above: the
   /// handler writes a history entry on *every* track change, and holding this
   /// in `setState` state rebuilt both page subtrees each time a song started —
@@ -211,6 +213,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     _positionNotifier.dispose();
     _durationNotifier.dispose();
     _lyricsNotifier.dispose();
+    _lyricsOffsetNotifier.dispose();
+    _hasLyricsReferenceNotifier.dispose();
     _pageFraction.dispose();
     _pageController.dispose();
     super.dispose();
@@ -316,48 +320,23 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
       _currentTrack.value = track;
       if (track != null) {
 
-        // Fetch lyrics with stale cache validation.
+        // Persist only the selected provider/id and timing offset. Lyrics
+        // themselves are fetched into memory and are never cached in SQLite.
         //
         // Every await below needs a `mounted` guard: cancelling the
         // subscription in dispose() stops *new* events, but an event already
         // being handled resumes after its await regardless — and writing to a
         // disposed ValueNotifier throws.
-        final cleanSongTitle =
-            LyricsEngine.cleanTitle(track.rawTitle)['songTitle'] ?? '';
-        final cached = await DatabaseService.getCachedLyrics(track.id);
+        final selection = await DatabaseService.getLyricsSelection(track.id);
         if (!mounted || _currentTrack.value?.id != track.id) return;
-
-        bool isCacheValid = false;
-        if (cached != null && cached.lines.isNotEmpty && cached.source != 'none') {
-          // Manually selected provider results, pasted/edited LRC and
-          // re-applied offset results are deliberate user choices. Validating
-          // them against the auto-cleaned title can fail
-          // — a paste is cached as 「自定义歌词」 — and the refetch below then
-          // silently overwrote the user's lyrics with the provider's.
-          if (cached.isManual ||
-              cached.source == 'user' ||
-              cached.source == 'current') {
-            isCacheValid = true;
-          } else {
-            final cachedTitle = cached.songTitle ?? '';
-            if (cachedTitle.isNotEmpty && LyricsEngine.isTitleMatching(cachedTitle, cleanSongTitle)) {
-              isCacheValid = true;
-            }
-          }
-        }
-
-        if (isCacheValid) {
-          _lyricsNotifier.value = cached!.lines;
-        } else {
-          _lyricsNotifier.value = const [];
-          final freshLyrics = await LyricsEngine.autoFetchLyrics(track.rawTitle);
-          if (!mounted || _currentTrack.value?.id != track.id) return;
-          // A "not found" result carries placeholder lines; showing an empty
-          // list instead lets the lyrics view offer its search/paste action.
-          _lyricsNotifier.value =
-              freshLyrics.source == 'none' ? const [] : freshLyrics.lines;
-          await DatabaseService.cacheLyrics(track.id, freshLyrics);
-        }
+        _hasLyricsReferenceNotifier.value = selection != null;
+        _lyricsOffsetNotifier.value = ((selection?['offset'] as num?) ?? 0).toDouble();
+        var selected = selection?['reference'] is Map
+            ? await LyricsEngine.fetchReferenceLyrics(LyricsReference.fromMap(Map<String, dynamic>.from(selection!['reference'] as Map)))
+            : null;
+        selected ??= await LyricsEngine.autoFetchLyrics(track.rawTitle);
+        if (!mounted || _currentTrack.value?.id != track.id) return;
+        _lyricsNotifier.value = selected.source == 'none' ? const [] : selected.lines;
       }
     }));
 
@@ -474,6 +453,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             positionNotifier: _positionNotifier,
             durationNotifier: _durationNotifier,
             lyricsNotifier: _lyricsNotifier,
+            lyricsOffsetNotifier: _lyricsOffsetNotifier,
+            hasLyricsReferenceNotifier: _hasLyricsReferenceNotifier,
             followHandler: follow,
             onQueueCleared: () {
               if (_activeTabIndex != 0) {

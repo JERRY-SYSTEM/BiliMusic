@@ -28,7 +28,7 @@ void main() {
         {'id':'favorites', 'name':'收藏', 'isOnline':false, 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手'}]},
         {'id':'online_42', 'name':'在线', 'isOnline':true, 'remoteId':'42', 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手'}]},
       ],
-      'manualLyrics': {'BVtest_p1':{'source':'user', 'isManual':true, 'songTitle':'我的歌词', 'lines':[]}},
+      'lyrics': {'BVtest_p1':{'reference': {'provider':'netease', 'id':'123'}, 'offset': 0}},
     })));
   });
   tearDown(() async { auth.dispose(); await AppDatabase.close(); });
@@ -45,7 +45,7 @@ void main() {
     final favorites = await DatabaseService.getFavoritesPlaylist();
     expect(favorites.tracks, hasLength(1));
     expect(favorites.tracks.single.title, '我的歌名');
-    expect((await DatabaseService.getCachedLyrics('BVtest_p1'))!.isManual, isTrue);
+    expect(await DatabaseService.getLyricsSelection('BVtest_p1'), isNotNull);
     final exported = await service.buildExportJson();
     expect((jsonDecode(exported) as Map)['schemaVersion'], 1);
     await DatabaseService.removeTrackFromPlaylist('favorites', 'BVtest_p1');
@@ -72,6 +72,6 @@ void main() {
     await expectLater(service.importBytes(bytes: backup, selection: const AppImportSelection(importSession: true, importFavorites: true, playlistIds: {})), throwsA(isA<DatabaseException>()));
     expect(auth.session, isNull);
     expect((await DatabaseService.getFavoritesPlaylist()).tracks, isEmpty);
-    expect(await DatabaseService.getCachedLyrics('BVtest_p1'), isNull);
+    expect(await DatabaseService.getLyricsSelection('BVtest_p1'), isNull);
   });
 }

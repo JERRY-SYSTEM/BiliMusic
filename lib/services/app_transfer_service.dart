@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import '../models/bili_session.dart';
 import '../models/bili_favorite_collection.dart';
-import '../models/lyric_line.dart';
 import '../models/playlist.dart';
 import '../models/track.dart';
 import 'bili_auth_service.dart';
@@ -87,7 +86,7 @@ class AppTransferService {
   final Future<List<Track>> Function(BiliSession, String)? fetchOnlineTracks;
   final Future<List<BiliFavoriteCollection>> Function(BiliSession)? fetchCollections;
 
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
   Future<String> buildExportJson() async {
     await _auth.initialize();
@@ -96,16 +95,18 @@ class AppTransferService {
         .expand((playlist) => playlist.tracks)
         .map((track) => track.id)
         .toSet();
-    final manualLyrics = await DatabaseService.getManualLyrics(referencedIds);
+    final lyrics = <String, Map<String, dynamic>>{};
+    for (final trackId in referencedIds) {
+      final selection = await DatabaseService.getLyricsSelection(trackId);
+      if (selection != null) lyrics[trackId] = selection;
+    }
     final session = _auth.session;
     final bundle = <String, dynamic>{
       'schemaVersion': schemaVersion,
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
       if (session != null && session.isLoggedIn) 'session': session.toMap(),
       'playlists': playlists.map(_playlistToJson).toList(),
-      'manualLyrics': manualLyrics.map(
-        (trackId, lyrics) => MapEntry(trackId, lyrics.toMap()),
-      ),
+      'lyrics': lyrics,
     };
     return const JsonEncoder.withIndent('  ').convert(bundle);
   }
@@ -323,14 +324,14 @@ class AppTransferService {
       );
     }
 
-    final selectedManualLyrics = Map<String, LyricsResult>.fromEntries(
-      bundle.manualLyrics.entries.where(
+    final selectedLyrics = Map<String, Map<String, dynamic>>.fromEntries(
+      bundle.lyrics.entries.where(
         (entry) => importedTrackIds.contains(entry.key),
       ),
     );
-    await DatabaseService.replacePlaylistsAndManualLyrics(
+    await DatabaseService.replacePlaylistsAndLyrics(
       playlists: current,
-      manualLyrics: selectedManualLyrics,
+      lyrics: selectedLyrics,
       trackOverrides: trackOverrides,
       session: selectedSession,
     );
@@ -426,24 +427,31 @@ class AppTransferService {
           throw const AppTransferException('备份中的登录信息不完整');
         }
       }
-      final manualLyrics = <String, LyricsResult>{};
-      final rawLyrics = json['manualLyrics'];
+      final lyrics = <String, Map<String, dynamic>>{};
+      final rawLyrics = json['lyrics'];
       if (rawLyrics != null) {
         if (rawLyrics is! Map) {
           throw const AppTransferException('备份中的歌词数据无效');
         }
         for (final entry in rawLyrics.entries) {
-          final lyrics = LyricsResult.fromMap(_stringMap(entry.value));
-          if (!lyrics.isManual) {
-            throw const AppTransferException('备份中包含非手动歌词');
+          final value = _stringMap(entry.value);
+          if (value['reference'] is! Map || value['offset'] is! num) {
+            throw const AppTransferException('备份中的歌词标识无效');
           }
-          manualLyrics[entry.key.toString()] = lyrics;
+          final reference = _stringMap(value['reference']);
+          if (reference['id'] is! String || reference['provider'] is! String) {
+            throw const AppTransferException('备份中的歌词标识无效');
+          }
+          lyrics[entry.key.toString()] = {
+            'reference': reference,
+            'offset': value['offset'],
+          };
         }
       }
       return _BackupBundle(
         session: session,
         playlists: playlists,
-        manualLyrics: manualLyrics,
+        lyrics: lyrics,
       );
     } on AppTransferException {
       rethrow;
@@ -464,12 +472,12 @@ class _BackupBundle {
   const _BackupBundle({
     required this.session,
     required this.playlists,
-    required this.manualLyrics,
+    required this.lyrics,
   });
 
   final BiliSession? session;
   final List<_BackupPlaylist> playlists;
-  final Map<String, LyricsResult> manualLyrics;
+  final Map<String, Map<String, dynamic>> lyrics;
 }
 
 class _BackupPlaylist {
