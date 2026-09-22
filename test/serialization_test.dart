@@ -163,7 +163,6 @@ void main() {
         source: 'netease',
         songTitle: '歌名',
         artistName: '歌手',
-        isManual: true,
         lines: [
           LyricLine(time: 0, text: '第一行'),
           LyricLine(time: 12.34, text: '第二行', translation: '译'),
@@ -173,7 +172,6 @@ void main() {
       expect(rt.source, 'netease');
       expect(rt.songTitle, '歌名');
       expect(rt.artistName, '歌手');
-      expect(rt.isManual, isTrue);
       expect(rt.lines, hasLength(2));
       expect(rt.lines[1].time, 12.34);
       expect(rt.lines[1].translation, '译');
@@ -188,7 +186,6 @@ void main() {
 
       final bare = LyricsResult.fromMap(throughJson({'lines': []}));
       expect(bare.source, 'none');
-      expect(bare.isManual, isFalse);
       expect(bare.lines, isEmpty);
     });
   });

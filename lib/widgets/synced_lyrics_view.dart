@@ -122,7 +122,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     _lastUpdate = now;
 
     final posSec =
-        (widget.positionNotifier.value.inMilliseconds / 1000.0) - widget.offset;
+        (widget.positionNotifier.value.inMilliseconds / 1000.0) + widget.offset;
     final newIndex = _findActiveIndex(posSec);
     if (newIndex != _activeIndex || force) {
       setState(() => _activeIndex = newIndex);
@@ -181,7 +181,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     final index = _selectionIndex;
     if (index == null || widget.onSeek == null) return;
     Haptics.selection();
-    widget.onSeek!(widget.lines[index].time + widget.offset);
+    widget.onSeek!(widget.lines[index].time - widget.offset);
     setState(() => _selectionIndex = null);
     _resumeFollowing();
   }
@@ -239,10 +239,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   void _handleCalibrationTap(int index) {
     final posSec = widget.positionNotifier.value.inMilliseconds / 1000.0;
     final lineTime = widget.lines[index].time;
-    // The user taps *after* hearing the line start, so the raw difference
-    // overshoots by roughly their reaction time. Subtract it.
-    final raw = posSec - lineTime;
-    final compensated = raw - _reactionCompensation;
+    // A positive offset looks further ahead in the lyrics. The user taps
+    // *after* hearing the line start, so add the estimated reaction time when
+    // converting the tap into that forward-looking offset.
+    final raw = lineTime - posSec;
+    final compensated = raw + _reactionCompensation;
     final offset = double.parse(compensated.toStringAsFixed(2));
     Haptics.selection();
     widget.onCalibrateTap!(offset);
@@ -375,7 +376,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
               ? null
               : () {
                   Haptics.selection();
-                  widget.onSeek!(line.time + widget.offset);
+                  widget.onSeek!(line.time - widget.offset);
                   _resumeFollowing();
                 }),
       child: AnimatedOpacity(
@@ -459,7 +460,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   Widget _selectionProgress() {
     final index = _selectionIndex!;
     final duration = Duration(
-      milliseconds: ((widget.lines[index].time + widget.offset) * 1000)
+      milliseconds: ((widget.lines[index].time - widget.offset) * 1000)
           .round()
           .clamp(0, 1 << 31)
           .toInt(),

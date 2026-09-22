@@ -20,7 +20,7 @@ class AppDatabase {
       final factory = _factory ?? databaseFactory;
       final path = _path ?? '${await factory.getDatabasesPath()}/bilimusic.db';
       return await factory.openDatabase(path, options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await db.execute('CREATE TABLE tracks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
@@ -31,7 +31,7 @@ class AppDatabase {
           }
           await db.execute('CREATE TABLE downloads (track_id TEXT NOT NULL REFERENCES tracks(id), quality INTEGER NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (track_id, quality))');
           await db.execute('CREATE TABLE search_history (query TEXT PRIMARY KEY, position INTEGER NOT NULL)');
-          await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, payload TEXT NOT NULL, position INTEGER NOT NULL)');
+          await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
           for (final table in ['settings', 'session', 'playback_state']) {
             await db.execute('CREATE TABLE $table (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)');
           }
@@ -39,6 +39,14 @@ class AppDatabase {
           await db.execute('CREATE INDEX playlist_tracks_by_track ON playlist_tracks(track_id)');
           await db.execute('CREATE INDEX playback_queue_by_track ON playback_queue(track_id)');
           await db.insert('playlists', {'id': 'favorites', 'position': 0, 'payload': jsonEncode({'id':'favorites', 'name':'收藏', 'isOnline':false})});
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            // v1 stored complete lyric text. It is intentionally discarded;
+            // only provider identifiers and user timing offsets are retained.
+            await db.execute('DROP TABLE IF EXISTS lyrics');
+            await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
+          }
         },
       ));
     } catch (_) {

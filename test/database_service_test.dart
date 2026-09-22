@@ -15,7 +15,6 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 Track track(String id) => Track(id: id, bvid: 'BVtest', cid: 1, title: id,
     rawTitle: id, uploader: 'artist', coverUrl: '', duration: 30);
-const manual = LyricsResult(source: 'user', lines: [], isManual: true, songTitle: '手动歌词');
 const session = BiliSession(sessData: 'test', biliJct: 'csrf', dedeUserId: '1', refreshToken: '', cookie: 'SESSDATA=test');
 
 void main() {
@@ -100,20 +99,21 @@ void main() {
     expect(await File('${directory.path}/audio_BV_p10.m4a.part').exists(), isTrue);
   });
 
-  test('search/history limits and lyrics bytes persist across reopen', () async {
+  test('search/history limits and lyric selections persist across reopen', () async {
     for (var i = 0; i < 55; i++) { await DatabaseService.addRecentlyPlayed(track('$i')); }
     for (var i = 0; i < 15; i++) { await DatabaseService.addSearchHistory('$i'); }
     await DatabaseService.addSearchHistory(' 14 ');
-    await DatabaseService.cacheLyrics('54', manual);
+    await DatabaseService.saveLyricsReference('54', const LyricsReference(provider: LyricProvider.netease, id: '54', title: '歌'));
+    await DatabaseService.adjustLyricsOffset('54', 0.5);
     await AppDatabase.close();
     expect(await DatabaseService.getRecentlyPlayed(), hasLength(50));
     expect(await (await AppDatabase.instance).query('tracks'), hasLength(50));
     expect(await DatabaseService.getSearchHistory(), hasLength(12));
     expect((await DatabaseService.getSearchHistory()).first, '14');
-    expect((await DatabaseService.lyricsSizes())['54'], utf8.encode(jsonEncode(manual.toMap())).length);
-    await DatabaseService.cacheLyrics('54', const LyricsResult(source: 'none', lines: []));
+    expect((await DatabaseService.getLyricsSelection('54'))!['offset'], 0.5);
+    await DatabaseService.removeCachedLyrics('54');
     await AppDatabase.close();
-    expect(await DatabaseService.getCachedLyrics('54'), isNull);
+    expect(await DatabaseService.getLyricsSelection('54'), isNull);
   });
 
   test('settings, session, shuffle and duplicate queue entries survive restart', () async {
@@ -142,19 +142,19 @@ void main() {
   });
 
   test('import transaction rolls back all tables and emits no success event', () async {
-    await DatabaseService.cacheLyrics('old', manual);
+    await DatabaseService.saveLyricsReference('old', const LyricsReference(provider: LyricProvider.netease, id: 'old'));
     await AppDatabase.writeState('session', session.toMap());
     final db = await AppDatabase.instance;
     await db.execute("CREATE TRIGGER fail_import BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
     var updates = 0;
     final subscription = DatabaseService.libraryUpdateStream.listen((_) => updates++);
-    await expectLater(DatabaseService.replacePlaylistsAndManualLyrics(
+    await expectLater(DatabaseService.replacePlaylistsAndLyrics(
       playlists: [Playlist(id: 'import', name: 'import', tracks: [track('new')])],
-      manualLyrics: {'new': manual}, session: session,
+      lyrics: {'new': {'reference': const LyricsReference(provider: LyricProvider.netease, id: 'new').toMap(), 'offset': 0}}, session: session,
     ), throwsA(isA<DatabaseException>()));
     expect((await DatabaseService.getPlaylists()).map((p) => p.id), ['favorites']);
-    expect(await DatabaseService.getCachedLyrics('new'), isNull);
-    expect(await DatabaseService.getCachedLyrics('old'), isNotNull);
+    expect(await DatabaseService.getLyricsSelection('new'), isNull);
+    expect(await DatabaseService.getLyricsSelection('old'), isNotNull);
     expect(await db.query('tracks'), isEmpty);
     expect((await AppDatabase.readState('session'))!['dedeUserId'], '1');
     expect(updates, 0);

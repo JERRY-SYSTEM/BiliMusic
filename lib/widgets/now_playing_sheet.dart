@@ -30,6 +30,8 @@ class NowPlayingSheet extends StatefulWidget {
   final ValueNotifier<Duration> positionNotifier;
   final ValueNotifier<Duration> durationNotifier;
   final ValueNotifier<List<LyricLine>> lyricsNotifier;
+  final ValueNotifier<double> lyricsOffsetNotifier;
+  final ValueNotifier<bool> hasLyricsReferenceNotifier;
 
   /// Set when the sheet is opened as part of "play this now". The handler has
   /// not switched track yet at that instant, so it cannot be inferred — and
@@ -45,6 +47,8 @@ class NowPlayingSheet extends StatefulWidget {
     required this.positionNotifier,
     required this.durationNotifier,
     required this.lyricsNotifier,
+    required this.lyricsOffsetNotifier,
+    required this.hasLyricsReferenceNotifier,
     this.followHandler = false,
     this.onQueueCleared,
   });
@@ -389,7 +393,11 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
           if (widget.handler.currentTrack?.id == track.id) {
             widget.lyricsNotifier.value = result.lines;
           }
-          await DatabaseService.cacheLyrics(track.id, result);
+          final reference = result.reference;
+          if (reference != null) {
+            await DatabaseService.saveLyricsReference(track.id, reference);
+            widget.hasLyricsReferenceNotifier.value = true;
+          }
         },
       );
     } finally {
@@ -609,55 +617,111 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
         Expanded(
           child: ValueListenableBuilder<List<LyricLine>>(
             valueListenable: widget.lyricsNotifier,
-            builder: (context, lines, _) => SyncedLyricsView(
-              lines: _isActive ? lines : const [],
-              positionNotifier: widget.positionNotifier,
-              showTranslation: _showTranslation,
-              onSeek: _isActive
-                  ? (seconds) => widget.handler.seek(
-                        Duration(milliseconds: (seconds * 1000).round()),
-                      )
-                  : null,
+            builder: (context, lines, _) => ValueListenableBuilder<double>(
+              valueListenable: widget.lyricsOffsetNotifier,
+              builder: (context, offset, _) => SyncedLyricsView(
+                lines: _isActive ? lines : const [],
+                positionNotifier: widget.positionNotifier,
+                showTranslation: _showTranslation,
+                offset: offset,
+                onSeek: _isActive
+                    ? (seconds) => widget.handler.seek(
+                          Duration(milliseconds: (seconds * 1000).round()),
+                        )
+                    : null,
+              ),
             ),
           ),
         ),
         ValueListenableBuilder<List<LyricLine>>(
           valueListenable: widget.lyricsNotifier,
-          builder: (context, lines, _) {
+          builder: (context, lines, _) => ValueListenableBuilder<bool>(
+            valueListenable: widget.hasLyricsReferenceNotifier,
+            builder: (context, hasReference, _) {
             final hasTranslation = lines.any(
               (line) => (line.translation ?? '').trim().isNotEmpty,
             );
-            return SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  IconButton(
-                    key: const Key('lyricSearchButton'),
-                    tooltip: '手动匹配歌词',
-                    color: context.palette.accent,
-                    onPressed: _openLyricSearch,
-                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
-                  ),
-                  if (hasTranslation) ...[
-                    const SizedBox(width: 20),
+            return ValueListenableBuilder<double>(
+              valueListenable: widget.lyricsOffsetNotifier,
+              builder: (context, offset, _) => SafeArea(
+                top: false,
+                child: Row(
+                  children: [
                     IconButton(
-                      tooltip: _showTranslation ? '隐藏译文' : '显示译文',
-                      color: context.palette.accent.withValues(
-                        alpha: _showTranslation ? 1 : 0.45,
-                      ),
-                      onPressed: () => setState(
-                        () => _showTranslation = !_showTranslation,
-                      ),
-                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedTranslate),
+                      key: const Key('lyricSearchButton'),
+                      tooltip: '手动匹配歌词',
+                      color: context.palette.accent,
+                      onPressed: _openLyricSearch,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
                     ),
+                    IconButton(
+                      key: const Key('lyricOffsetBackwardButton'),
+                      tooltip: '显示前 0.5 秒歌词',
+                      color: context.palette.accent,
+                      onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft),
+                    ),
+                    SizedBox(
+                      width: 44,
+                      child: Text(
+                        _formatLyricsOffset(offset),
+                        key: const Key('lyricOffsetValue'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: context.palette.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('lyricOffsetResetButton'),
+                      tooltip: '重置歌词偏移',
+                      color: context.palette.accent,
+                      onPressed: _isActive && hasReference && offset != 0
+                          ? () => _adjustLyricsOffset(-offset)
+                          : null,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedTimerReset),
+                    ),
+                    IconButton(
+                      key: const Key('lyricOffsetForwardButton'),
+                      tooltip: '显示后 0.5 秒歌词',
+                      color: context.palette.accent,
+                      onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight),
+                    ),
+                    const Spacer(),
+                    if (hasTranslation)
+                      IconButton(
+                        tooltip: _showTranslation ? '隐藏译文' : '显示译文',
+                        color: context.palette.accent.withValues(
+                          alpha: _showTranslation ? 1 : 0.45,
+                        ),
+                        onPressed: () => setState(
+                          () => _showTranslation = !_showTranslation,
+                        ),
+                        icon: const HugeIcon(icon: HugeIcons.strokeRoundedTranslate),
+                      ),
                   ],
-                ],
+                ),
               ),
             );
-          },
+            },
+          ),
         ),
       ],
     );
+  }
+
+  Future<void> _adjustLyricsOffset(double delta) async {
+    if (!_isActive) return;
+    Haptics.selection();
+    widget.lyricsOffsetNotifier.value += delta;
+    await DatabaseService.adjustLyricsOffset(_displayTrack.id, delta);
+  }
+
+  String _formatLyricsOffset(double offset) {
+    final normalized = offset.abs() < 0.05 ? 0.0 : offset;
+    return '${normalized >= 0 ? '+' : ''}${normalized.toStringAsFixed(1)}';
   }
 
   String _formatPublishTime(int? seconds) {
