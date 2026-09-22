@@ -5,6 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/bili_http.dart';
+import '../services/track_enrichment_service.dart';
+import '../models/track.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 
@@ -24,6 +26,7 @@ class CachedCoverImage extends StatefulWidget {
   final double width;
   final double height;
   final BoxFit fit;
+  final Track? track;
 
   const CachedCoverImage({
     super.key,
@@ -31,6 +34,7 @@ class CachedCoverImage extends StatefulWidget {
     required this.width,
     required this.height,
     this.fit = BoxFit.cover,
+    this.track,
   });
 
   /// Appends Bilibili CDN resize params when the host supports them.
@@ -82,6 +86,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   void initState() {
     super.initState();
     _loadKey = widget.url;
+    _requestEnrichment();
   }
 
   @override
@@ -103,6 +108,15 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
         _status = _CoverStatus.loading;
       });
       _loadImage();
+    }
+    if (oldWidget.track?.id != widget.track?.id) _requestEnrichment();
+  }
+
+  void _requestEnrichment() {
+    final track = widget.track;
+    if (track != null &&
+        (track.musicSource.isEmpty || track.musicId.isEmpty || track.coverUrl.isEmpty)) {
+      TrackEnrichmentService.enrichInBackground(track);
     }
   }
 
@@ -183,7 +197,15 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   static Future<File?> _downloadAndCache(String fetchUrl, File file) async {
     try {
       final req = await _client.getUrl(Uri.parse(fetchUrl));
-      req.headers.set('Referer', 'https://www.bilibili.com/');
+      final host = req.uri.host;
+      req.headers.set(
+        'Referer',
+        host.contains('music.126.net') || host.contains('music.163.com')
+            ? 'https://music.163.com/'
+            : host.contains('y.gtimg.cn')
+                ? 'https://y.qq.com/'
+                : 'https://www.bilibili.com/',
+      );
       req.headers.set('User-Agent', kBiliUserAgent);
       final res = await req.close();
 

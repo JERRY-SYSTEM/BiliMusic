@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../models/bili_session.dart';
 import '../models/bili_favorite_collection.dart';
+import '../models/lyric_line.dart';
 import '../models/playlist.dart';
 import '../models/track.dart';
 import 'bili_auth_service.dart';
@@ -69,12 +70,14 @@ class AppImportResult {
     required this.trackCount,
     required this.skippedTrackCount,
     required this.failedOnlinePlaylistCount,
+    this.parseWarnings = const [],
   });
 
   final int playlistCount;
   final int trackCount;
   final int skippedTrackCount;
   final int failedOnlinePlaylistCount;
+  final List<String> parseWarnings;
 }
 
 class AppTransferService {
@@ -98,7 +101,16 @@ class AppTransferService {
     final lyrics = <String, Map<String, dynamic>>{};
     for (final trackId in referencedIds) {
       final selection = await DatabaseService.getLyricsSelection(trackId);
-      if (selection != null) lyrics[trackId] = selection;
+      if (selection != null) {
+        final reference = Map<String, dynamic>.from(selection['reference'] as Map);
+        lyrics[trackId] = {
+          'reference': {
+            'provider': reference['provider'],
+            'id': reference['id'],
+          },
+          'offset': selection['offset'],
+        };
+      }
     }
     final session = _auth.session;
     final bundle = <String, dynamic>{
@@ -154,7 +166,9 @@ class AppTransferService {
     final trackOverrides = <String, Track>{};
     var playlistCount = 0;
     var trackCount = 0;
-    var skippedTrackCount = 0;
+    var skippedTrackCount = bundle.warnings
+        .where((warning) => warning.startsWith('跳过歌单'))
+        .length;
     var failedOnlinePlaylistCount = 0;
 
     Future<Track?> hydrate(_BackupTrack reference) async {
@@ -166,6 +180,9 @@ class AppTransferService {
       return base?.copyWith(
         title: reference.title,
         uploader: reference.uploader,
+        coverUrl: '',
+        musicSource: reference.musicSource,
+        musicId: reference.musicId,
       );
     }
 
@@ -234,6 +251,8 @@ class AppTransferService {
                 : fresh.copyWith(
                     title: override.title,
                     uploader: override.uploader,
+                    musicSource: override.musicSource,
+                    musicId: override.musicId,
                   );
           }).toList();
         } else {
@@ -319,6 +338,8 @@ class AppTransferService {
               : track.copyWith(
                   title: override.title,
                   uploader: override.uploader,
+                  musicSource: override.musicSource,
+                  musicId: override.musicId,
                 );
         }).toList(),
       );
@@ -343,6 +364,7 @@ class AppTransferService {
       trackCount: trackCount,
       skippedTrackCount: skippedTrackCount,
       failedOnlinePlaylistCount: failedOnlinePlaylistCount,
+      parseWarnings: bundle.warnings,
     );
   }
 
@@ -376,6 +398,8 @@ class AppTransferService {
                 'cid': track.cid,
                 'title': track.title,
                 'uploader': track.uploader,
+                'musicSource': track.musicSource,
+                'musicId': track.musicId,
               },
             )
             .toList(),
@@ -399,11 +423,11 @@ class AppTransferService {
       }
       final json = Map<String, dynamic>.from(decoded);
       final version = json['schemaVersion'];
-      if (version is! int || version < 1) {
+      if (version is! int) {
         throw const AppTransferException('备份文件缺少有效的版本信息');
       }
-      if (version > schemaVersion) {
-        throw const AppTransferException('备份由更新版本的 BiliMusic 创建，当前版本无法导入');
+      if (version != schemaVersion) {
+        throw const AppTransferException('备份版本与当前 BiliMusic 不匹配');
       }
       final exportedAt = json['exportedAt'];
       if (exportedAt is! String || DateTime.tryParse(exportedAt) == null) {
@@ -413,9 +437,19 @@ class AppTransferService {
       if (rawPlaylists is! List) {
         throw const AppTransferException('备份中的歌单数据无效');
       }
-      final playlists = rawPlaylists
-          .map((item) => _BackupPlaylist.fromJson(_stringMap(item)))
-          .toList();
+      final warnings = <String>[];
+      final playlists = <_BackupPlaylist>[];
+      for (var index = 0; index < rawPlaylists.length; index++) {
+        final item = rawPlaylists[index];
+        try {
+          playlists.add(_BackupPlaylist.fromJson(
+            _stringMap(item),
+            warnings: warnings,
+          ));
+        } catch (error) {
+          throw AppTransferException('备份中第 ${index + 1} 个歌单无效：$error');
+        }
+      }
       final ids = playlists.map((playlist) => playlist.id).toSet();
       if (ids.length != playlists.length) {
         throw const AppTransferException('备份中存在重复的歌单 ID');
@@ -429,29 +463,30 @@ class AppTransferService {
       }
       final lyrics = <String, Map<String, dynamic>>{};
       final rawLyrics = json['lyrics'];
-      if (rawLyrics != null) {
-        if (rawLyrics is! Map) {
-          throw const AppTransferException('备份中的歌词数据无效');
-        }
-        for (final entry in rawLyrics.entries) {
+      if (rawLyrics is! Map) {
+        throw const AppTransferException('备份中的歌词数据无效');
+      }
+      for (final entry in rawLyrics.entries) {
+        try {
           final value = _stringMap(entry.value);
           if (value['reference'] is! Map || value['offset'] is! num) {
-            throw const AppTransferException('备份中的歌词标识无效');
+            throw const FormatException('结构无效');
           }
           final reference = _stringMap(value['reference']);
-          if (reference['id'] is! String || reference['provider'] is! String) {
-            throw const AppTransferException('备份中的歌词标识无效');
-          }
+          LyricsReference.fromMap(reference);
           lyrics[entry.key.toString()] = {
             'reference': reference,
             'offset': value['offset'],
           };
+        } catch (error) {
+          warnings.add('跳过歌词 ${entry.key}：$error');
         }
       }
       return _BackupBundle(
         session: session,
         playlists: playlists,
         lyrics: lyrics,
+        warnings: warnings,
       );
     } on AppTransferException {
       rethrow;
@@ -473,11 +508,13 @@ class _BackupBundle {
     required this.session,
     required this.playlists,
     required this.lyrics,
+    required this.warnings,
   });
 
   final BiliSession? session;
   final List<_BackupPlaylist> playlists;
   final Map<String, Map<String, dynamic>> lyrics;
+  final List<String> warnings;
 }
 
 class _BackupPlaylist {
@@ -489,7 +526,7 @@ class _BackupPlaylist {
     required this.tracks,
   });
 
-  factory _BackupPlaylist.fromJson(Map<String, dynamic> json) {
+  factory _BackupPlaylist.fromJson(Map<String, dynamic> json, {required List<String> warnings}) {
     final id = json['id'];
     final name = json['name'];
     final isOnline = json['isOnline'];
@@ -506,11 +543,16 @@ class _BackupPlaylist {
     if (id == Playlist.favoritesId && isOnline) {
       throw const AppTransferException('收藏不能是在线歌单');
     }
-    final tracks = rawTracks
-        .map((item) => _BackupTrack.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ))
-        .toList();
+    final tracks = <_BackupTrack>[];
+    for (var index = 0; index < rawTracks.length; index++) {
+      try {
+        tracks.add(_BackupTrack.fromJson(
+          Map<String, dynamic>.from(rawTracks[index] as Map),
+        ));
+      } catch (error) {
+        warnings.add('跳过歌单“$name”第 ${index + 1} 首歌：$error');
+      }
+    }
     if (tracks.map((track) => track.id).toSet().length != tracks.length) {
       throw const AppTransferException('备份歌单中存在重复的歌曲 ID');
     }
@@ -537,6 +579,8 @@ class _BackupTrack {
     required this.cid,
     required this.title,
     required this.uploader,
+    required this.musicSource,
+    required this.musicId,
   });
 
   factory _BackupTrack.fromJson(Map<String, dynamic> json) {
@@ -545,6 +589,8 @@ class _BackupTrack {
     final cid = json['cid'];
     final title = json['title'];
     final uploader = json['uploader'];
+    final musicSource = json['musicSource'];
+    final musicId = json['musicId'];
     if (id is! String ||
         id.isEmpty ||
         bvid is! String ||
@@ -552,7 +598,11 @@ class _BackupTrack {
         cid is! int ||
         cid < 0 ||
         title is! String ||
-        uploader is! String) {
+        uploader is! String ||
+        musicSource is! String ||
+        musicId is! String ||
+        (musicSource.isEmpty != musicId.isEmpty) ||
+        (musicSource.isNotEmpty && !LyricProvider.values.any((p) => p.apiName == musicSource))) {
       throw const AppTransferException('备份中的歌曲标识无效');
     }
     if (!RegExp('^${RegExp.escape(bvid)}_p[1-9][0-9]*\$').hasMatch(id)) {
@@ -564,6 +614,8 @@ class _BackupTrack {
       cid: cid.toInt(),
       title: title,
       uploader: uploader,
+      musicSource: musicSource,
+      musicId: musicId,
     );
   }
 
@@ -572,4 +624,6 @@ class _BackupTrack {
   final int cid;
   final String title;
   final String uploader;
+  final String musicSource;
+  final String musicId;
 }

@@ -34,11 +34,11 @@ class BiliSession {
       };
 
   factory BiliSession.fromMap(Map<String, dynamic> map) => BiliSession(
-        sessData: map['sessData'] as String? ?? '',
-        biliJct: map['biliJct'] as String? ?? '',
-        dedeUserId: map['dedeUserId'] as String? ?? '',
-        refreshToken: map['refreshToken'] as String? ?? '',
-        cookie: map['cookie'] as String? ?? '',
+        sessData: map['sessData'] as String,
+        biliJct: map['biliJct'] as String,
+        dedeUserId: map['dedeUserId'] as String,
+        refreshToken: map['refreshToken'] as String,
+        cookie: map['cookie'] as String,
         mid: (map['mid'] as num?)?.toInt(),
         uname: map['uname'] as String?,
         face: map['face'] as String?,

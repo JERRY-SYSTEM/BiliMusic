@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../models/track.dart';
 import '../models/playlist.dart';
 import '../services/database_service.dart';
+import '../services/track_enrichment_service.dart';
 import '../services/audio_download_service.dart';
 import '../services/download_manager.dart';
 import '../utils/snack.dart';
@@ -103,6 +104,9 @@ class TrackOptionsMenu extends StatefulWidget {
                             // One persist for the whole batch, not a full-file
                             // rewrite per track.
                             await DatabaseService.addTracksToPlaylist(created.id, tracks);
+                            for (final track in tracks) {
+                              TrackEnrichmentService.enrichInBackground(track);
+                            }
                             for (final t in tracks) {
                               DownloadManager.instance.startDownload(t);
                             }
@@ -132,6 +136,9 @@ class TrackOptionsMenu extends StatefulWidget {
                           subtitle: Text('${pl.tracks.length} 首', style: TextStyle(color: context.palette.textMuted, fontSize: 12)),
                           onTap: () async {
                             await DatabaseService.addTracksToPlaylist(pl.id, tracks);
+                            for (final track in tracks) {
+                              TrackEnrichmentService.enrichInBackground(track);
+                            }
                             for (final t in tracks) {
                               DownloadManager.instance.startDownload(t);
                             }
@@ -207,6 +214,7 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
     final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context);
     final nowFav = await DatabaseService.toggleFavorite(widget.track);
+    if (nowFav) TrackEnrichmentService.enrichInBackground(widget.track);
     if (nowFav && !_isDownloaded) {
       DownloadManager.instance.startDownload(widget.track);
     }

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 
 import 'package:bilimusic/models/track.dart';
+import 'package:bilimusic/models/lyric_line.dart';
 import 'package:bilimusic/services/audio_player_handler.dart';
 
 const first = Track(
@@ -151,6 +152,36 @@ void main() {
     // ignore: deprecated_member_use
     expect((player.source as ja.ConcatenatingAudioSource).length, 2);
     expect(handler.isPlaying, isTrue);
+  });
+
+  test('lyric metadata updates preserve progress and expose translation', () async {
+    await handler.playTrack(first, newQueue: [first])
+        .timeout(const Duration(seconds: 1));
+    player.position = const Duration(seconds: 4);
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '第一句'),
+      LyricLine(time: 3, text: '第二句', translation: 'Translation'),
+    ], offsetSeconds: 0);
+
+    expect(handler.mediaItem.value?.title, '第二句');
+    expect(handler.mediaItem.value?.artist, 'Translation');
+    expect(handler.playbackState.value.updatePosition,
+        const Duration(seconds: 4));
+  });
+
+  test('lyric metadata without translation uses the song title', () async {
+    await handler.playTrack(first, newQueue: [first])
+        .timeout(const Duration(seconds: 1));
+    player.position = const Duration(seconds: 2);
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '歌词'),
+    ], offsetSeconds: 0);
+
+    expect(handler.mediaItem.value?.artist, first.title);
+    expect(handler.playbackState.value.updatePosition,
+        const Duration(seconds: 2));
   });
 
   test('EOF advances without prefetch in shuffle mode', () async {

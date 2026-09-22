@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/track.dart';
 import '../services/database_service.dart';
+import '../services/track_enrichment_service.dart';
 import '../theme/app_theme.dart';
 import 'cached_cover_image.dart';
 
@@ -62,6 +63,9 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
     // One persist for the whole batch — the per-track call rewrote the
     // entire playlists file once per selected song.
     await DatabaseService.addTracksToPlaylist(widget.playlistId, tracksToAdd);
+    for (final track in tracksToAdd) {
+      TrackEnrichmentService.enrichInBackground(track);
+    }
     if (mounted) Navigator.pop(context);
     await widget.onAdded();
   }

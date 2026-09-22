@@ -80,7 +80,6 @@ class BiliFavoritesService {
     if ((map['type'] as num? ?? 2).toInt() != 2) return null;
     final bvid = map['bvid'] as String? ?? map['bv_id'] as String? ?? '';
     var title = map['title'] as String? ?? '';
-    var cover = _normalizeCoverUrl(map['cover'] as String?) ?? '';
     final upper = map['upper'] is Map ? Map<String, dynamic>.from(map['upper'] as Map) : const <String, dynamic>{};
     var uploader = upper['name'] as String? ?? '';
     var duration = (map['duration'] as num? ?? 0).toInt();
@@ -90,25 +89,20 @@ class BiliFavoritesService {
       if (aid == null) return null;
       final info = await BilibiliSdk.fetchVideoInfo('av$aid');
       if (info.isEmpty) return null;
-      return info.first;
+      return info.first.copyWith(coverUrl: '');
     }
-    // The favorites endpoint often omits `cover` while still returning all
-    // other track metadata. Fetch the canonical video metadata in that case
-    // as well, otherwise the synced playlist permanently stores an empty
-    // cover URL and the UI has nothing to load.
-    if (cid == 0 || title.isEmpty || uploader.isEmpty || cover.isEmpty) {
+    if (cid == 0 || title.isEmpty || uploader.isEmpty) {
       final info = await BilibiliSdk.fetchVideoInfo(bvid);
       if (info.isNotEmpty) {
         final first = info.first;
         cid = cid == 0 ? first.cid : cid;
         title = title.isEmpty ? first.title : title;
         uploader = uploader.isEmpty ? first.uploader : uploader;
-        cover = cover.isEmpty ? first.coverUrl : cover;
         duration = duration == 0 ? first.duration : duration;
       }
     }
     if (cid == 0 || bvid.isEmpty) return null;
-    return Track(id: '${bvid}_p1', bvid: bvid, cid: cid, title: title.isEmpty ? '未知曲目' : title, rawTitle: title, uploader: uploader.isEmpty ? '未知UP主' : uploader, coverUrl: cover, duration: duration);
+    return Track(id: '${bvid}_p1', bvid: bvid, cid: cid, title: title.isEmpty ? '未知曲目' : title, rawTitle: title, uploader: uploader.isEmpty ? '未知UP主' : uploader, coverUrl: '', musicSource: '', musicId: '', duration: duration);
   }
 
   static Future<Map<String, dynamic>> _get(String url, String cookies) async {

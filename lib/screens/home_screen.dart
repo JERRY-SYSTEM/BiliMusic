@@ -354,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(AppRadius.sm),
               child: CachedCoverImage(
                 url: task.track.coverUrl,
+                track: task.track,
                 width: 48,
                 height: 48,
               ),
@@ -570,6 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   borderRadius: BorderRadius.circular(14),
                                   child: CachedCoverImage(
                                     url: track.coverUrl,
+                                    track: track,
                                     width: 130,
                                     height: 130,
                                   ),

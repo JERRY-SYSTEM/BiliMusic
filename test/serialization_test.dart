@@ -20,6 +20,8 @@ Track _track({String id = 'BV1_p1', String? audioUrl}) => Track(
       originalUploader: '原UP主',
       uploader: 'UP主',
       coverUrl: 'https://example.com/cover.jpg',
+      musicSource: 'netease',
+      musicId: '123',
       duration: 245,
       audioUrl: audioUrl,
       publishTime: 1700000000,
@@ -47,6 +49,8 @@ void main() {
       expect(rt.originalUploader, t.originalUploader);
       expect(rt.uploader, t.uploader);
       expect(rt.coverUrl, t.coverUrl);
+      expect(rt.musicSource, t.musicSource);
+      expect(rt.musicId, t.musicId);
       expect(rt.duration, t.duration);
       expect(rt.audioUrl, t.audioUrl);
       expect(rt.publishTime, t.publishTime);
@@ -81,16 +85,11 @@ void main() {
       expect(rt.title, '显示标题');
     });
 
-    test('tolerates missing keys (newer writer) with safe defaults', () {
-      final rt = Track.fromMap(throughJson({'id': 'x'}));
-      expect(rt.id, 'x');
-      expect(rt.title, isNotEmpty);
-      expect(rt.uploader, isNotEmpty);
-      expect(rt.cid, 0);
-      expect(rt.duration, 0);
-      // rawTitle falls back to the *persisted* title; when both are absent
-      // there is nothing to fall back to and it stays empty.
-      expect(rt.rawTitle, isEmpty);
+    test('rejects missing required keys', () {
+      expect(
+        () => Track.fromMap(throughJson({'id': 'x'})),
+        throwsA(isA<TypeError>()),
+      );
     });
   });
 
@@ -135,7 +134,7 @@ void main() {
     });
 
     test('tracks list is always growable (add-to-favorites regression)', () {
-      final rt = Playlist.fromMap({'id': 'p', 'name': 'n'});
+      final rt = Playlist.fromMap({'id': 'p', 'name': 'n', 'isOnline': false});
       rt.tracks.add(_track()); // must not throw
       expect(rt.tracks, hasLength(1));
     });
@@ -177,16 +176,17 @@ void main() {
       expect(rt.lines[1].translation, '译');
     });
 
-    test('nullable titles survive and default source is none', () {
+    test('nullable titles survive for the explicit none source', () {
       final rt = LyricsResult.fromMap(
-          throughJson(const LyricsResult(source: 'user', lines: []).toMap()));
-      expect(rt.source, 'user');
+          throughJson(const LyricsResult(source: 'none', lines: []).toMap()));
+      expect(rt.source, 'none');
       expect(rt.songTitle, isNull);
       expect(rt.artistName, isNull);
 
-      final bare = LyricsResult.fromMap(throughJson({'lines': []}));
-      expect(bare.source, 'none');
-      expect(bare.lines, isEmpty);
+      expect(
+        () => LyricsResult.fromMap(throughJson({'lines': []})),
+        throwsA(isA<TypeError>()),
+      );
     });
   });
 }

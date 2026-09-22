@@ -27,6 +27,10 @@ class Track {
   final String? originalUploader;
   final String uploader;
   final String coverUrl;
+  /// Music catalog identity used to restore lyrics and artwork without
+  /// searching again. Empty strings mean that enrichment is still pending.
+  final String musicSource;
+  final String musicId;
   final int duration; // in seconds
   final String? audioUrl;
   final int? qualityId;
@@ -49,6 +53,8 @@ class Track {
     this.originalUploader,
     required this.uploader,
     required this.coverUrl,
+    this.musicSource = '',
+    this.musicId = '',
     required this.duration,
     this.audioUrl,
     this.qualityId,
@@ -73,6 +79,8 @@ class Track {
       'originalUploader': originalUploader,
       'uploader': uploader,
       'coverUrl': coverUrl,
+      'musicSource': musicSource,
+      'musicId': musicId,
       'duration': duration,
       'audioUrl': audioUrl,
       'qualityId': qualityId,
@@ -90,16 +98,25 @@ class Track {
 
   /// Shared mapping for SQLite records and network-derived track values.
   factory Track.fromMap(Map<String, dynamic> map) {
+    final musicSource = map['musicSource'] as String;
+    final musicId = map['musicId'] as String;
+    if (musicSource.isEmpty != musicId.isEmpty ||
+        (musicSource.isNotEmpty &&
+            !const {'netease', 'kugou', 'tencent'}.contains(musicSource))) {
+      throw const FormatException('歌曲来源与 ID 无效');
+    }
     return Track(
-      id: map['id'] ?? '',
-      bvid: map['bvid'] ?? '',
-      cid: map['cid'] ?? 0,
-      title: map['title'] ?? '未知曲目',
-      rawTitle: map['rawTitle'] as String? ?? map['title'] as String? ?? '',
+      id: map['id'] as String,
+      bvid: map['bvid'] as String,
+      cid: map['cid'] as int,
+      title: map['title'] as String,
+      rawTitle: map['rawTitle'] as String,
       originalUploader: map['originalUploader'] as String?,
-      uploader: map['uploader'] ?? '未知UP主',
-      coverUrl: map['coverUrl'] ?? '',
-      duration: map['duration'] ?? 0,
+      uploader: map['uploader'] as String,
+      coverUrl: map['coverUrl'] as String,
+      musicSource: musicSource,
+      musicId: musicId,
+      duration: map['duration'] as int,
       audioUrl: map['audioUrl'],
       qualityId: (map['qualityId'] as num?)?.toInt(),
       publishTime: (map['publishTime'] as num?)?.toInt(),
@@ -119,6 +136,8 @@ class Track {
     String? rawTitle,
     String? uploader,
     String? coverUrl,
+    String? musicSource,
+    String? musicId,
     int? duration,
     String? audioUrl,
     int? qualityId,
@@ -142,6 +161,8 @@ class Track {
       originalUploader: originalUploader ?? this.originalUploader,
       uploader: uploader ?? this.uploader,
       coverUrl: coverUrl ?? this.coverUrl,
+      musicSource: musicSource ?? this.musicSource,
+      musicId: musicId ?? this.musicId,
       duration: duration ?? this.duration,
       audioUrl: audioUrl ?? this.audioUrl,
       qualityId: qualityId ?? this.qualityId,

@@ -10,11 +10,13 @@ import 'models/lyric_line.dart';
 import 'models/bili_favorite_collection.dart';
 import 'services/lyrics_engine.dart';
 import 'services/database_service.dart';
+import 'services/app_database.dart';
 import 'services/audio_player_handler.dart';
 import 'services/audio_download_service.dart';
 import 'services/app_settings_service.dart';
 import 'services/bili_auth_service.dart';
 import 'services/bili_favorites_service.dart';
+import 'services/track_enrichment_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/haptics.dart';
 import 'theme/motion.dart';
@@ -193,10 +195,24 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     BiliAuthController.instance.addListener(_onAuthChanged);
     unawaited(BiliAuthController.instance.initialize());
     _initListeners();
+    _lyricsNotifier.addListener(_syncSystemLyrics);
+    _lyricsOffsetNotifier.addListener(_syncSystemLyrics);
     _subs.add(_audioHandler.queueStream.listen((_) {
       if (mounted) _queueRevision.value++;
     }));
+    _subs.add(TrackEnrichmentService.updates.listen((track) {
+      _audioHandler.updateCurrentTrackMetadata(track);
+    }));
     _loadHistory();
+    if (AppDatabase.consumeSchemaResetNotice()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('数据库已升级，旧版本地数据已重置'),
+          duration: Duration(seconds: 6),
+        ));
+      });
+    }
   }
 
   @override
@@ -209,6 +225,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     _currentTrack.dispose();
     _recentlyPlayed.dispose();
     _isPlaying.dispose();
+    _lyricsNotifier.removeListener(_syncSystemLyrics);
+    _lyricsOffsetNotifier.removeListener(_syncSystemLyrics);
     _queueRevision.dispose();
     _positionNotifier.dispose();
     _durationNotifier.dispose();
@@ -298,6 +316,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
               // older entries whose cover was empty because the favorites
               // endpoint omitted it.
               coverUrl: old.coverUrl.trim().isEmpty ? fresh.coverUrl : old.coverUrl,
+              musicSource: old.musicSource,
+              musicId: old.musicId,
             );
     }).toList();
     // The collection API is the source of truth. A null cover intentionally
@@ -319,9 +339,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     _subs.add(_audioHandler.currentTrackStream.listen((track) async {
       _currentTrack.value = track;
       if (track != null) {
+        _lyricsNotifier.value = const [];
+        _lyricsOffsetNotifier.value = 0;
+        _audioHandler.updateSystemLyrics(const [], offsetSeconds: 0);
 
-        // Persist only the selected provider/id and timing offset. Lyrics
-        // themselves are fetched into memory and are never cached in SQLite.
+        // Prefer the persisted lyric cache. If it was cleared, restore it from
+        // the saved provider/id without running automatic search again.
         //
         // Every await below needs a `mounted` guard: cancelling the
         // subscription in dispose() stops *new* events, but an event already
@@ -331,12 +354,43 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         if (!mounted || _currentTrack.value?.id != track.id) return;
         _hasLyricsReferenceNotifier.value = selection != null;
         _lyricsOffsetNotifier.value = ((selection?['offset'] as num?) ?? 0).toDouble();
-        var selected = selection?['reference'] is Map
-            ? await LyricsEngine.fetchReferenceLyrics(LyricsReference.fromMap(Map<String, dynamic>.from(selection!['reference'] as Map)))
-            : null;
-        selected ??= await LyricsEngine.autoFetchLyrics(track.rawTitle);
+        var selected = await DatabaseService.getCachedLyrics(track.id);
+        LyricsReference? reference;
+        if (selection?['reference'] is Map) {
+          reference = LyricsReference.fromMap(
+            Map<String, dynamic>.from(selection!['reference'] as Map),
+          );
+        } else if (track.musicSource.isNotEmpty && track.musicId.isNotEmpty) {
+          reference = LyricsReference(
+            provider: LyricProvider.values.firstWhere(
+              (provider) => provider.apiName == track.musicSource,
+            ),
+            id: track.musicId,
+            title: track.title,
+            artist: track.uploader,
+            pictureUrl: track.coverUrl.isEmpty ? null : track.coverUrl,
+          );
+        }
+        if (selected == null && reference != null) {
+          selected = await LyricsEngine.fetchReferenceLyrics(
+            reference,
+          );
+          if (selected?.reference != null && selected!.lines.isNotEmpty) {
+            await DatabaseService.saveLyricsReference(
+              track.id,
+              selected.reference!,
+              lines: selected.lines,
+            );
+            _hasLyricsReferenceNotifier.value = true;
+          }
+        }
         if (!mounted || _currentTrack.value?.id != track.id) return;
-        _lyricsNotifier.value = selected.source == 'none' ? const [] : selected.lines;
+        _lyricsNotifier.value = selected?.lines ?? const [];
+      } else {
+        _lyricsNotifier.value = const [];
+        _lyricsOffsetNotifier.value = 0;
+        _hasLyricsReferenceNotifier.value = false;
+        _audioHandler.updateSystemLyrics(const [], offsetSeconds: 0);
       }
     }));
 
@@ -365,6 +419,13 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
       _positionNotifier.value = _audioHandler.position;
       _durationNotifier.value = Duration(seconds: restored.duration);
     }
+  }
+
+  void _syncSystemLyrics() {
+    _audioHandler.updateSystemLyrics(
+      _lyricsNotifier.value,
+      offsetSeconds: _lyricsOffsetNotifier.value,
+    );
   }
 
   Future<void> _loadHistory() async {

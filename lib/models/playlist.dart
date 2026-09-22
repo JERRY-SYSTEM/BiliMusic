@@ -48,12 +48,14 @@ class Playlist {
 
   factory Playlist.fromMap(Map<String, dynamic> map, {List<Track>? tracks}) {
     return Playlist(
-      id: map['id'] ?? '',
-      name: map['name'] ?? '未命名歌单',
+      id: map['id'] as String,
+      name: map['name'] as String,
       coverUrl: map['coverUrl'] as String?,
       remoteId: map['remoteId'] as String?,
-      isOnline: map['isOnline'] == true,
-      lastSyncedAt: DateTime.tryParse(map['lastSyncedAt'] as String? ?? ''),
+      isOnline: map['isOnline'] as bool,
+      lastSyncedAt: map['lastSyncedAt'] == null
+          ? null
+          : DateTime.parse(map['lastSyncedAt'] as String),
       tracks: tracks ?? [],
     );
   }

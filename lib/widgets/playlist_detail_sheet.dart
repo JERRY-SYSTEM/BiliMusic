@@ -513,6 +513,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
               borderRadius: BorderRadius.circular(8),
               child: CachedCoverImage(
                 url: track.coverUrl,
+                track: track,
                 width: 48,
                 height: 48,
               ),

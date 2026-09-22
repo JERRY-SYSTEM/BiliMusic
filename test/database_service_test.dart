@@ -103,7 +103,11 @@ void main() {
     for (var i = 0; i < 55; i++) { await DatabaseService.addRecentlyPlayed(track('$i')); }
     for (var i = 0; i < 15; i++) { await DatabaseService.addSearchHistory('$i'); }
     await DatabaseService.addSearchHistory(' 14 ');
-    await DatabaseService.saveLyricsReference('54', const LyricsReference(provider: LyricProvider.netease, id: '54', title: '歌'));
+    await DatabaseService.saveLyricsReference(
+      '54',
+      const LyricsReference(provider: LyricProvider.netease, id: '54', title: '歌'),
+      lines: [LyricLine(time: 1, text: '第一句')],
+    );
     await DatabaseService.adjustLyricsOffset('54', 0.5);
     await AppDatabase.close();
     expect(await DatabaseService.getRecentlyPlayed(), hasLength(50));
@@ -111,9 +115,33 @@ void main() {
     expect(await DatabaseService.getSearchHistory(), hasLength(12));
     expect((await DatabaseService.getSearchHistory()).first, '14');
     expect((await DatabaseService.getLyricsSelection('54'))!['offset'], 0.5);
+    expect((await DatabaseService.getCachedLyrics('54'))!.lines.single.text, '第一句');
     await DatabaseService.removeCachedLyrics('54');
     await AppDatabase.close();
-    expect(await DatabaseService.getLyricsSelection('54'), isNull);
+    expect(await DatabaseService.getLyricsSelection('54'), isNotNull);
+    expect(await DatabaseService.getCachedLyrics('54'), isNull);
+  });
+
+  test('track enrichment atomically stores catalog identity, cover and lyrics', () async {
+    final original = track('enriched');
+    await DatabaseService.addTrackToPlaylist(Playlist.favoritesId, original);
+    final result = LyricsResult(
+      source: 'netease',
+      songTitle: '歌名',
+      artistName: '歌手',
+      lines: [LyricLine(time: 0, text: '歌词')],
+      reference: const LyricsReference(
+        provider: LyricProvider.netease,
+        id: '100',
+        pictureUrl: 'https://example.com/cover.jpg',
+      ),
+    );
+    await DatabaseService.completeTrackEnrichment(original, result);
+    final saved = (await DatabaseService.getFavoritesPlaylist()).tracks.single;
+    expect(saved.musicSource, 'netease');
+    expect(saved.musicId, '100');
+    expect(saved.coverUrl, 'https://example.com/cover.jpg');
+    expect((await DatabaseService.getCachedLyrics(saved.id))!.lines.single.text, '歌词');
   });
 
   test('settings, session, shuffle and duplicate queue entries survive restart', () async {

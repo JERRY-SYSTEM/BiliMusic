@@ -90,16 +90,14 @@ void main() {
       expect(back.duration, t.duration);
     });
 
-    test('tolerates files written by older versions', () {
-      final back = Track.fromMap({
+    test('rejects tracks written by older versions', () {
+      expect(() => Track.fromMap({
         'id': 'BV1_2', 'bvid': 'BV1', 'cid': 2, 'title': 't',
         'uploader': 'u', 'coverUrl': '', 'duration': 5,
-        // Fields removed in 2.2.0 — must not break loading.
+        // Obsolete fields do not replace the required current-schema fields.
         'uploaderFace': 'x', 'quality': 'hi', 'isDownloaded': 1,
         'localFilePath': '/tmp/a', 'addedAt': 123,
-      });
-      expect(back.id, 'BV1_2');
-      expect(back.title, 't');
+      }), throwsA(isA<TypeError>()));
     });
   });
 

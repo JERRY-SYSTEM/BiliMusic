@@ -55,7 +55,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
                   ListTile(
                     leading: const HugeIcon(icon: HugeIcons.strokeRoundedDatabaseExport),
                     title: const Text('导出数据'),
-                    subtitle: const Text('备份登录信息、收藏、歌单与本地自定义'),
+                    subtitle: const Text('备份登录信息、收藏、歌单、歌曲来源与歌词偏移'),
                     trailing: _exporting
                         ? const SizedBox(
                             width: 20,
@@ -84,7 +84,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              '不会备份音频、封面、联网元信息、普通歌词缓存、播放记录、外观或音质设置。导入歌单时需联网重新获取歌曲信息。',
+              '不会备份音频、封面文件、歌词正文缓存、播放记录、外观或音质设置。会备份歌曲来源、ID 和歌词时间偏移，导入后按需联网恢复缓存。',
               style: TextStyle(color: context.palette.textMuted),
             ),
           ],
@@ -183,7 +183,8 @@ class _AppTransferPageState extends State<AppTransferPage> {
         '导入完成：${importResult.playlistCount} 个歌单、'
         '${importResult.trackCount} 首歌曲'
         '${importResult.skippedTrackCount > 0 ? '，跳过 ${importResult.skippedTrackCount} 首' : ''}'
-        '${importResult.failedOnlinePlaylistCount > 0 ? '，${importResult.failedOnlinePlaylistCount} 个在线歌单需稍后重试同步' : ''}',
+        '${importResult.failedOnlinePlaylistCount > 0 ? '，${importResult.failedOnlinePlaylistCount} 个在线歌单需稍后重试同步' : ''}'
+        '${importResult.parseWarnings.isNotEmpty ? '\n${importResult.parseWarnings.join('\n')}' : ''}',
       );
     } catch (error) {
       if (mounted) _showMessage('导入失败：$error');

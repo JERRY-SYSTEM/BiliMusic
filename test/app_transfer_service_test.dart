@@ -11,7 +11,7 @@ Uint8List _bytes(Map<String, dynamic> json) =>
     Uint8List.fromList(utf8.encode(jsonEncode(json)));
 
 Map<String, dynamic> _validBackup() => {
-      'schemaVersion': 1,
+      'schemaVersion': 3,
       'exportedAt': '2026-09-06T08:00:00.000Z',
       'session': {
         'sessData': 'secret-session',
@@ -32,6 +32,8 @@ Map<String, dynamic> _validBackup() => {
               'cid': 11,
               'title': '自定义歌名',
               'uploader': '自定义歌手',
+              'musicSource': 'netease',
+              'musicId': '123',
             },
           ],
         },
@@ -45,7 +47,7 @@ Map<String, dynamic> _validBackup() => {
       ],
       'lyrics': {
         'BV1test_p1': {
-          'reference': {'provider': 'netease', 'id': '123', 'title': '歌'},
+          'reference': {'provider': 'netease', 'id': '123'},
           'offset': 0.5,
         },
       },
@@ -76,9 +78,17 @@ void main() {
         isA<AppTransferException>().having(
           (error) => error.message,
           'message',
-          contains('更新版本'),
+          contains('不匹配'),
         ),
       ),
+    );
+  });
+
+  test('rejects backups from an older schema', () {
+    final backup = _validBackup()..['schemaVersion'] = 2;
+    expect(
+      () => service.previewImport(_bytes(backup)),
+      throwsA(isA<AppTransferException>()),
     );
   });
 
@@ -90,31 +100,21 @@ void main() {
     expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
   });
 
-  test('rejects a part id belonging to a different video', () {
+  test('skips a part id belonging to a different video', () {
     final backup = _validBackup();
     final playlists = backup['playlists'] as List;
     final track = (playlists.first['tracks'] as List).first as Map;
     track['id'] = 'BVother_p1';
-    expect(() => service.previewImport(_bytes(backup)),
-        throwsA(isA<AppTransferException>()));
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
   });
 
-  test('rejects invalid lyric references in a backup', () {
+  test('skips invalid lyric references in a backup', () {
     final backup = _validBackup();
     final lyrics = backup['lyrics'] as Map<String, dynamic>;
     final entry = lyrics['BV1test_p1'] as Map<String, dynamic>;
     entry['reference'] = {'provider': 'netease'};
 
-    expect(
-      () => service.previewImport(_bytes(backup)),
-      throwsA(
-        isA<AppTransferException>().having(
-          (error) => error.message,
-          'message',
-          contains('歌词标识无效'),
-        ),
-      ),
-    );
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
   });
 
   testWidgets('设置页在缓存管理上方显示数据导入导出入口', (tester) async {

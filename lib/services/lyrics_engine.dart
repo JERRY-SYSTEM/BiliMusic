@@ -66,7 +66,7 @@ class LyricsEngine {
       switch (provider) {
         case LyricProvider.netease:
           final body = await _httpGet(
-            'https://music.163.com/api/search/get?s=${Uri.encodeComponent(query)}&type=1&limit=10',
+            'https://music.163.com/api/search/get?s=${Uri.encodeComponent(query)}&type=1&limit=30',
             headers: const {'Referer': 'https://music.163.com'},
           );
           final songs = body == null
@@ -1060,6 +1060,15 @@ class LyricsEngine {
               songTitle: songName,
               artistName: artists.isNotEmpty ? artists : artist,
               lines: lines,
+              reference: LyricsReference(
+                provider: LyricProvider.netease,
+                id: chosenSong['id'].toString(),
+                title: songName,
+                artist: artists.isNotEmpty ? artists : artist,
+                pictureUrl: await _fetchNetEasePictureUrl(
+                  chosenSong['id'].toString(),
+                ),
+              ),
             );
           }
         }
