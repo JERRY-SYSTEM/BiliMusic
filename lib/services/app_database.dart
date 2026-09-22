@@ -12,6 +12,13 @@ class AppDatabase {
   static Future<Database>? _opening;
   static DatabaseFactory? _factory;
   static String? _path;
+  static bool _wasResetForSchemaUpgrade = false;
+
+  static bool consumeSchemaResetNotice() {
+    final value = _wasResetForSchemaUpgrade;
+    _wasResetForSchemaUpgrade = false;
+    return value;
+  }
 
   static Future<Database> get instance => _opening ??= _open();
 
@@ -20,7 +27,7 @@ class AppDatabase {
       final factory = _factory ?? databaseFactory;
       final path = _path ?? '${await factory.getDatabasesPath()}/bilimusic.db';
       return await factory.openDatabase(path, options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await db.execute('CREATE TABLE tracks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
@@ -31,7 +38,7 @@ class AppDatabase {
           }
           await db.execute('CREATE TABLE downloads (track_id TEXT NOT NULL REFERENCES tracks(id), quality INTEGER NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (track_id, quality))');
           await db.execute('CREATE TABLE search_history (query TEXT PRIMARY KEY, position INTEGER NOT NULL)');
-          await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
+          await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, lines_json TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
           for (final table in ['settings', 'session', 'playback_state']) {
             await db.execute('CREATE TABLE $table (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)');
           }
@@ -41,12 +48,31 @@ class AppDatabase {
           await db.insert('playlists', {'id': 'favorites', 'position': 0, 'payload': jsonEncode({'id':'favorites', 'name':'收藏', 'isOnline':false})});
         },
         onUpgrade: (db, oldVersion, newVersion) async {
-          if (oldVersion < 2) {
-            // v1 stored complete lyric text. It is intentionally discarded;
-            // only provider identifiers and user timing offsets are retained.
-            await db.execute('DROP TABLE IF EXISTS lyrics');
-            await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
+          for (final table in [
+            'playback_queue', 'downloads', 'downloaded_tracks',
+            'recently_played', 'playlist_tracks', 'playlists', 'tracks',
+            'search_history', 'lyrics', 'settings', 'session',
+            'playback_state',
+          ]) {
+            await db.execute('DROP TABLE IF EXISTS $table');
           }
+          await db.execute('CREATE TABLE tracks (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
+          await db.execute('CREATE TABLE playlists (id TEXT PRIMARY KEY, position INTEGER NOT NULL, payload TEXT NOT NULL)');
+          await db.execute('CREATE TABLE playlist_tracks (playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, track_id TEXT NOT NULL REFERENCES tracks(id), position INTEGER NOT NULL, PRIMARY KEY (playlist_id, track_id))');
+          for (final table in ['downloaded_tracks', 'recently_played']) {
+            await db.execute('CREATE TABLE $table (track_id TEXT PRIMARY KEY REFERENCES tracks(id), position INTEGER NOT NULL)');
+          }
+          await db.execute('CREATE TABLE downloads (track_id TEXT NOT NULL REFERENCES tracks(id), quality INTEGER NOT NULL, path TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (track_id, quality))');
+          await db.execute('CREATE TABLE search_history (query TEXT PRIMARY KEY, position INTEGER NOT NULL)');
+          await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, lines_json TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
+          for (final table in ['settings', 'session', 'playback_state']) {
+            await db.execute('CREATE TABLE $table (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)');
+          }
+          await db.execute('CREATE TABLE playback_queue (kind TEXT NOT NULL, position INTEGER NOT NULL, track_id TEXT NOT NULL REFERENCES tracks(id), PRIMARY KEY (kind, position))');
+          await db.execute('CREATE INDEX playlist_tracks_by_track ON playlist_tracks(track_id)');
+          await db.execute('CREATE INDEX playback_queue_by_track ON playback_queue(track_id)');
+          await db.insert('playlists', {'id': 'favorites', 'position': 0, 'payload': jsonEncode({'id':'favorites', 'name':'收藏', 'isOnline':false})});
+          _wasResetForSchemaUpgrade = true;
         },
       ));
     } catch (_) {

@@ -10,7 +10,7 @@ import 'cached_cover_image.dart';
 Future<void> showLyricSearchSheet({
   required BuildContext context,
   required String initialKeyword,
-  required Future<void> Function(LyricsResult result) onApply,
+  required Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -33,7 +33,7 @@ class _LyricSearchSheet extends StatefulWidget {
   });
 
   final String initialKeyword;
-  final Future<void> Function(LyricsResult result) onApply;
+  final Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply;
 
   @override
   State<_LyricSearchSheet> createState() => _LyricSearchSheetState();
@@ -111,7 +111,15 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
       });
       return;
     }
-    await widget.onApply(result);
+    final selection = await showDialog<LyricApplySelection>(
+      context: context,
+      builder: (_) => const _LyricApplyDialog(),
+    );
+    if (selection == null || !mounted) {
+      setState(() => _loadingId = null);
+      return;
+    }
+    await widget.onApply(result, selection);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -272,6 +280,57 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
           onTap: _loadingId == null && !_searching ? () => _apply(item) : null,
         );
       },
+    );
+  }
+}
+
+class LyricApplySelection {
+  const LyricApplySelection({
+    required this.title,
+    required this.artist,
+    required this.cover,
+  });
+
+  final bool title;
+  final bool artist;
+  final bool cover;
+}
+
+class _LyricApplyDialog extends StatefulWidget {
+  const _LyricApplyDialog();
+
+  @override
+  State<_LyricApplyDialog> createState() => _LyricApplyDialogState();
+}
+
+class _LyricApplyDialogState extends State<_LyricApplyDialog> {
+  bool _title = false;
+  bool _artist = false;
+  bool _cover = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('选择要覆盖的内容'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CheckboxListTile(title: const Text('歌名'), value: _title, onChanged: (v) => setState(() => _title = v ?? false)),
+          CheckboxListTile(title: const Text('作者'), value: _artist, onChanged: (v) => setState(() => _artist = v ?? false)),
+          CheckboxListTile(title: const Text('封面'), value: _cover, onChanged: (v) => setState(() => _cover = v ?? false)),
+          const CheckboxListTile(title: Text('歌词'), value: true, onChanged: null),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+            context,
+            LyricApplySelection(title: _title, artist: _artist, cover: _cover),
+          ),
+          child: const Text('覆盖'),
+        ),
+      ],
     );
   }
 }

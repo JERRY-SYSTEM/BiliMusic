@@ -8,6 +8,7 @@ import '../models/track.dart';
 import '../services/audio_player_handler.dart';
 import '../services/bilibili_sdk.dart';
 import '../services/database_service.dart';
+import '../services/track_enrichment_service.dart';
 import '../services/audio_download_service.dart';
 import '../services/download_manager.dart';
 import '../theme/app_theme.dart';
@@ -236,6 +237,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
   Future<void> _handleFavorite() async {
     Haptics.light();
     final nowFav = await DatabaseService.toggleFavorite(_displayTrack);
+    if (nowFav) TrackEnrichmentService.enrichInBackground(_displayTrack);
     if (mounted) setState(() => _isFavorite = nowFav);
     if (nowFav && !_isDownloaded) _startDownload();
   }
@@ -389,15 +391,33 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       await showLyricSearchSheet(
         context: context,
         initialKeyword: track.title.trim(),
-        onApply: (result) async {
+        onApply: (result, selection) async {
+          final reference = result.reference;
+          if (reference == null) return;
+          var updated = track.copyWith(
+            title: selection.title && (result.songTitle ?? '').trim().isNotEmpty
+                ? result.songTitle!.trim()
+                : track.title,
+            uploader: selection.artist && (result.artistName ?? '').trim().isNotEmpty
+                ? result.artistName!.trim()
+                : track.uploader,
+            coverUrl: selection.cover && (reference.pictureUrl ?? '').trim().isNotEmpty
+                ? reference.pictureUrl!.trim()
+                : track.coverUrl,
+            musicSource: reference.provider.apiName,
+            musicId: reference.id,
+          );
+          updated = await DatabaseService.completeTrackEnrichment(
+            updated,
+            result,
+            useReferenceCover: selection.cover,
+            overwriteDisplayMetadata: true,
+          );
+          widget.handler.updateCurrentTrackMetadata(updated);
           if (widget.handler.currentTrack?.id == track.id) {
             widget.lyricsNotifier.value = result.lines;
           }
-          final reference = result.reference;
-          if (reference != null) {
-            await DatabaseService.saveLyricsReference(track.id, reference);
-            widget.hasLyricsReferenceNotifier.value = true;
-          }
+          widget.hasLyricsReferenceNotifier.value = true;
         },
       );
     } finally {

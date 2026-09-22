@@ -35,6 +35,21 @@ class CacheInventory {
     final otherFiles = <File>[];
     var otherBytes = 0;
     final otherLyrics = <String>[];
+    final lyricBytesByTrack = <String, int>{};
+    final lyricRows = await (await AppDatabase.instance)
+        .query('lyrics', columns: ['track_id', 'lines_json']);
+    for (final row in lyricRows) {
+      final trackId = row['track_id'] as String;
+      final payload = row['lines_json'] as String?;
+      if (payload == null) continue;
+      final bytes = utf8.encode(payload).length;
+      if (buckets.containsKey(trackId)) {
+        lyricBytesByTrack[trackId] = bytes;
+      } else {
+        otherBytes += bytes;
+        otherLyrics.add(trackId);
+      }
+    }
     final coverByTrack = <String, List<File>>{};
     final audioDir = Directory('${docs.path}/bilimusic_audio');
     final audioOwners = {for (final row in await AppDatabase.downloads()) row['path'] as String: row['track_id'] as String};
@@ -71,7 +86,7 @@ class CacheInventory {
       ...buckets.values.map((bucket) => CacheBucket(
             track: bucket.track,
             files: bucket.files,
-            lyricsBytes: bucket.lyricsBytes,
+            lyricsBytes: lyricBytesByTrack[bucket.track!.id] ?? 0,
             coverFiles: coverByTrack[bucket.track!.id] ?? const [],
           )),
       if (otherFiles.isNotEmpty || otherBytes > 0)

@@ -1,14 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as ja;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
+import '../models/lyric_line.dart';
 import 'audio_download_service.dart';
 import 'database_service.dart';
 import 'app_database.dart';
+import 'bili_http.dart';
 import 'player_queue_manager.dart';
 
 enum LoopMode { off, all, one }
@@ -93,6 +99,13 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
       StreamController<PlaybackQueueState>.broadcast();
 
   Duration _duration = Duration.zero;
+  List<LyricLine> _systemLyrics = const [];
+  double _systemLyricsOffset = 0;
+  int _systemLyricIndex = -1;
+  String _systemMediaTitle = '';
+  String _systemMediaArtist = '';
+  final Map<String, Uri> _systemArtworkCache = {};
+  final Map<String, Future<Uri?>> _systemArtworkInFlight = {};
 
   Stream<Track?> get currentTrackStream => _currentTrackController.stream;
   Stream<bool> get playerStateStream => _playerStateController.stream;
@@ -160,21 +173,23 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     try {
       final map = await AppDatabase.readPlayback();
       if (map == null) return;
-      List<Track> decode(String key) => (map[key] as List<dynamic>? ?? [])
+      List<Track> decode(String key) => (map[key] as List<dynamic>)
           .map((e) => Track.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList();
       final natural = decode('naturalOrder');
       final queue = decode('queue');
       if (queue.isEmpty) return;
-      _naturalOrder..clear()..addAll(natural.isEmpty ? queue : natural);
+      _naturalOrder..clear()..addAll(natural);
       _playlist..clear()..addAll(queue);
       _isShuffle = map['shuffle'] == true;
-      final loop = map['loopMode'] as String?;
-      _loopMode = LoopMode.values.firstWhere((m) => m.name == loop, orElse: () => LoopMode.all);
-      _currentIndex = (map['currentIndex'] as num?)?.toInt() ?? 0;
-      if (_currentIndex < 0 || _currentIndex >= _playlist.length) _currentIndex = 0;
+      final loop = map['loopMode'] as String;
+      _loopMode = LoopMode.values.firstWhere((m) => m.name == loop);
+      _currentIndex = (map['currentIndex'] as num).toInt();
+      if (_currentIndex < 0 || _currentIndex >= _playlist.length) {
+        throw const FormatException('播放队列位置无效');
+      }
       _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
-      _resumePosition = Duration(milliseconds: (map['positionMs'] as num?)?.toInt() ?? 0);
+      _resumePosition = Duration(milliseconds: (map['positionMs'] as num).toInt());
       // Restore the queue without starting native playback during bootstrap.
       // The old auto-resume path could race Flutter's first frame and leave
       // the app behind a white loading surface. The saved position is kept;
@@ -280,6 +295,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     // the notification position from the last state + speed.
     _player.positionStream.listen((position) {
       _positionController.add(position);
+      _updateSystemLyric(position);
       if (_playlist.isNotEmpty) _schedulePersist();
     });
 
@@ -382,6 +398,9 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Announce the newly active track to every observer: the UI stream, the
   /// system media session, the recently-played history and the duration.
   void _announce(Track track) {
+    _systemLyrics = const [];
+    _systemLyricsOffset = 0;
+    _systemLyricIndex = -1;
     _currentTrackController.add(track);
     _updateMediaItem(track);
     unawaited(DatabaseService.addRecentlyPlayed(track));
@@ -1094,14 +1113,164 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void _updateMediaItem(Track track) {
-    final item = MediaItem(
+    _systemLyricIndex = -1;
+    _systemMediaTitle = track.title;
+    _systemMediaArtist = track.uploader;
+    _publishSystemMediaItem(track);
+    _prepareSystemArtwork(track);
+    _updateSystemLyric(_player.position);
+  }
+
+  void updateSystemLyrics(List<LyricLine> lines, {required double offsetSeconds}) {
+    _systemLyrics = List<LyricLine>.unmodifiable(lines);
+    _systemLyricsOffset = offsetSeconds;
+    _systemLyricIndex = -2;
+    _updateSystemLyric(_player.position);
+  }
+
+  void _updateSystemLyric(Duration position) {
+    final track = currentTrack;
+    if (track == null) return;
+    final seconds = position.inMilliseconds / 1000 - _systemLyricsOffset;
+    var index = -1;
+    for (var i = 0; i < _systemLyrics.length; i++) {
+      if (_systemLyrics[i].time <= seconds) {
+        index = i;
+      } else {
+        break;
+      }
+    }
+    if (index == _systemLyricIndex) return;
+    _systemLyricIndex = index;
+    final line = index >= 0 ? _systemLyrics[index] : null;
+    final lyric = line?.text.trim() ?? '';
+    final translation = line?.translation?.trim() ?? '';
+    _systemMediaTitle = lyric.isEmpty ? track.title : lyric;
+    _systemMediaArtist = translation.isNotEmpty ? translation : track.title;
+    _publishSystemMediaItem(track, preservePosition: true);
+  }
+
+  void _publishSystemMediaItem(
+    Track track, {
+    bool preservePosition = false,
+  }) {
+    mediaItem.add(MediaItem(
       id: track.id,
       album: 'BiliMusic',
-      title: track.title,
-      artist: track.uploader,
+      title: _systemMediaTitle,
+      artist: _systemMediaArtist,
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),
-      artUri: track.coverUrl.isEmpty ? null : Uri.tryParse(track.coverUrl),
+      artUri: _systemArtworkUri(track.coverUrl),
+    ));
+    // Updating MPNowPlayingInfo's title/artist makes iOS temporarily reset
+    // elapsedPlaybackTime to zero unless a position-bearing playback state is
+    // published immediately afterwards. Do this only for in-track metadata
+    // changes (lyrics/artwork); a real track change is deliberately reset to
+    // zero by [_announce].
+    if (preservePosition && currentTrack?.id == track.id) {
+      _broadcastState(
+        positionOverride: _player.position,
+        bufferedPositionOverride: _player.bufferedPosition,
+      );
+    }
+  }
+
+  Uri? _systemArtworkUri(String coverUrl) {
+    if (coverUrl.isEmpty) return null;
+    final cached = _systemArtworkCache[coverUrl];
+    if (cached != null) return cached;
+    if (coverUrl.startsWith('/') || coverUrl.startsWith('file://') ||
+        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(coverUrl)) {
+      final path = coverUrl.startsWith('file://')
+          ? coverUrl.substring('file://'.length)
+          : coverUrl;
+      return Uri.file(path);
+    }
+    final remote = Uri.tryParse(coverUrl);
+    if (remote == null) return null;
+    // NetEase rejects the unauthenticated request made by the native Now
+    // Playing implementation. Do not publish the known-broken remote URL;
+    // [_prepareSystemArtwork] will replace it with a local file URI.
+    if (remote.host.contains('music.126.net') ||
+        remote.host.contains('music.163.com')) {
+      return null;
+    }
+    return remote;
+  }
+
+  void _prepareSystemArtwork(Track track) {
+    final url = track.coverUrl;
+    if (url.isEmpty || _systemArtworkCache.containsKey(url) ||
+        url.startsWith('/') || url.startsWith('file://') ||
+        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(url)) {
+      return;
+    }
+    final operation = _systemArtworkInFlight.putIfAbsent(
+      url,
+      () => _downloadSystemArtwork(url),
     );
-    mediaItem.add(item);
+    unawaited(operation.then((uri) {
+      _systemArtworkInFlight.remove(url);
+      if (uri == null) return;
+      _systemArtworkCache[url] = uri;
+      final active = currentTrack;
+      if (active != null && active.id == track.id && active.coverUrl == url) {
+        _publishSystemMediaItem(active, preservePosition: true);
+      }
+    }, onError: (Object _, StackTrace __) {
+      _systemArtworkInFlight.remove(url);
+    }));
+  }
+
+  Future<Uri?> _downloadSystemArtwork(String url) async {
+    try {
+      final support = await getApplicationSupportDirectory();
+      final directory = Directory('${support.path}/bilimusic_covers');
+      if (!await directory.exists()) await directory.create(recursive: true);
+      final key = md5.convert(utf8.encode(url)).toString();
+      final file = File('${directory.path}/system_$key.jpg');
+      if (await file.exists() && await file.length() > 0) {
+        return Uri.file(file.path);
+      }
+
+      final client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        request.headers.set('User-Agent', kBiliUserAgent);
+        final host = request.uri.host;
+        request.headers.set(
+          'Referer',
+          host.contains('music.126.net') || host.contains('music.163.com')
+              ? 'https://music.163.com/'
+              : host.contains('y.gtimg.cn')
+                  ? 'https://y.qq.com/'
+                  : 'https://www.bilibili.com/',
+        );
+        final response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          await response.drain<void>();
+          return null;
+        }
+        final part = File('${file.path}.part');
+        try {
+          final sink = part.openWrite();
+          try {
+            await response.pipe(sink);
+          } finally {
+            await sink.close();
+          }
+          if (await part.length() == 0) return null;
+          await part.rename(file.path);
+          return Uri.file(file.path);
+        } finally {
+          if (await part.exists()) await part.delete();
+        }
+      } finally {
+        client.close(force: true);
+      }
+    } catch (error) {
+      debugPrint('System artwork cache failed: $error');
+      return null;
+    }
   }
 }

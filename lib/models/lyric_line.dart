@@ -20,8 +20,8 @@ class LyricLine {
   factory LyricLine.fromMap(Map<String, dynamic> map) {
     return LyricLine(
       time: (map['time'] as num).toDouble(),
-      text: map['text'] ?? '',
-      translation: map['translation'],
+      text: map['text'] as String,
+      translation: map['translation'] as String?,
     );
   }
 }
@@ -85,13 +85,14 @@ class LyricsReference {
       };
 
   factory LyricsReference.fromMap(Map<String, dynamic> map) {
+    final id = map['id'] as String;
+    if (id.isEmpty) throw const FormatException('歌曲 ID 不能为空');
     final provider = LyricProvider.values.firstWhere(
       (item) => item.apiName == map['provider'],
-      orElse: () => LyricProvider.netease,
     );
     return LyricsReference(
       provider: provider,
-      id: map['id'] as String,
+      id: id,
       title: map['title'] as String?,
       artist: map['artist'] as String?,
       pictureUrl: map['pictureUrl'] as String?,
@@ -100,7 +101,7 @@ class LyricsReference {
 }
 
 class LyricsResult {
-  final String source; // provider api name | 'user' | 'current' | 'none'
+  final String source; // provider api name | 'none'
   final String? songTitle;
   final String? artistName;
   final List<LyricLine> lines;
@@ -125,9 +126,14 @@ class LyricsResult {
   }
 
   factory LyricsResult.fromMap(Map<String, dynamic> map) {
-    final rawLines = map['lines'] as List? ?? const [];
+    final source = map['source'] as String;
+    if (source != 'none' &&
+        !LyricProvider.values.any((provider) => provider.apiName == source)) {
+      throw FormatException('未知歌词来源: $source');
+    }
+    final rawLines = map['lines'] as List;
     return LyricsResult(
-      source: map['source'] as String? ?? 'none',
+      source: source,
       songTitle: map['songTitle'] as String?,
       artistName: map['artistName'] as String?,
       reference: map['reference'] is Map

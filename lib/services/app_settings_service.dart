@@ -18,10 +18,9 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final map = await AppDatabase.readState('settings');
       if (map != null) {
-        themeMode = map['themeMode'] as String? ?? themeMode;
-        accentValue = (map['accentValue'] as num?)?.toInt() ?? accentValue;
-        defaultAudioQuality =
-            (map['defaultAudioQuality'] as num?)?.toInt() ?? defaultAudioQuality;
+        themeMode = map['themeMode'] as String;
+        accentValue = (map['accentValue'] as num).toInt();
+        defaultAudioQuality = (map['defaultAudioQuality'] as num).toInt();
       }
     } catch (_) {
       _initializing = null;

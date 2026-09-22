@@ -34,8 +34,8 @@ void main() {
     expect(edited.rawTitle, t.rawTitle);
   });
 
-  test('legacy track without rawTitle falls back to title', () {
-    final t = Track.fromMap({
+  test('legacy track without current fields is rejected', () {
+    expect(() => Track.fromMap({
       'id': 'x',
       'bvid': 'BV1QYBeBGEcU',
       'cid': 1,
@@ -43,7 +43,6 @@ void main() {
       'uploader': '周深工作室',
       'coverUrl': '',
       'duration': 300,
-    });
-    expect(t.rawTitle, '音乐缘计划');
+    }), throwsA(isA<TypeError>()));
   });
 }

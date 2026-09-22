@@ -162,7 +162,12 @@ class DatabaseService {
     });
   }
   static Future<void> clearSearchHistory() => _write((txn) async { await txn.delete('search_history'); });
-  static Future<void> saveLyricsReference(String trackId, LyricsReference reference) => _write((txn) async {
+  static Future<void> saveLyricsReference(
+    String trackId,
+    LyricsReference reference, {
+    List<LyricLine>? lines,
+  }) => _write((txn) async {
+    final existing = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [trackId]);
     await txn.insert('lyrics', {
       'track_id': trackId,
       'provider': reference.provider.apiName,
@@ -170,8 +175,79 @@ class DatabaseService {
       'title': reference.title,
       'artist': reference.artist,
       'picture_url': reference.pictureUrl,
+      'lines_json': lines == null
+          ? (existing.isEmpty ? null : existing.first['lines_json'])
+          : jsonEncode(lines.map((line) => line.toMap()).toList()),
+      'offset_ms': existing.isEmpty ? 0 : existing.first['offset_ms'],
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   });
+
+  static Future<LyricsResult?> getCachedLyrics(String trackId) async {
+    final rows = await (await AppDatabase.instance)
+        .query('lyrics', where: 'track_id = ?', whereArgs: [trackId]);
+    if (rows.isEmpty || rows.first['lines_json'] == null) return null;
+    final reference = LyricsReference.fromMap({
+      'provider': rows.first['provider'],
+      'id': rows.first['lyric_id'],
+      'title': rows.first['title'],
+      'artist': rows.first['artist'],
+      'pictureUrl': rows.first['picture_url'],
+    });
+    final List<LyricLine> lines;
+    try {
+      final raw = jsonDecode(rows.first['lines_json'] as String) as List;
+      lines = raw
+          .map((item) => LyricLine.fromMap(Map<String, dynamic>.from(item as Map)))
+          .toList(growable: false);
+    } catch (_) {
+      return null;
+    }
+    if (lines.isEmpty) return null;
+    return LyricsResult(
+      source: reference.provider.apiName,
+      songTitle: reference.title,
+      artistName: reference.artist,
+      lines: lines,
+      reference: reference,
+    );
+  }
+
+  static Future<Track> completeTrackEnrichment(
+    Track track,
+    LyricsResult result, {
+    bool useReferenceCover = true,
+    bool overwriteDisplayMetadata = false,
+  }
+  ) => _write((txn) async {
+    final reference = result.reference;
+    if (reference == null || result.lines.isEmpty) {
+      throw StateError('歌曲补全结果不完整');
+    }
+    final trackRows = await txn.query('tracks', where: 'id = ?', whereArgs: [track.id]);
+    final base = overwriteDisplayMetadata || trackRows.isEmpty
+        ? track
+        : Track.fromMap(AppDatabase.decode(trackRows.first['payload']));
+    final updated = base.copyWith(
+      coverUrl: !useReferenceCover || (reference.pictureUrl ?? '').isEmpty
+          ? base.coverUrl
+          : reference.pictureUrl,
+      musicSource: reference.provider.apiName,
+      musicId: reference.id,
+    );
+    await AppDatabase.putTrack(txn, updated, overwrite: true);
+    final old = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [track.id]);
+    await txn.insert('lyrics', {
+      'track_id': track.id,
+      'provider': reference.provider.apiName,
+      'lyric_id': reference.id,
+      'title': reference.title,
+      'artist': reference.artist,
+      'picture_url': reference.pictureUrl,
+      'lines_json': jsonEncode(result.lines.map((line) => line.toMap()).toList()),
+      'offset_ms': old.isEmpty ? 0 : old.first['offset_ms'],
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return updated;
+  }, library: true, history: true);
 
   static Future<LyricsReference?> getLyricsReference(String id) async {
     final rows = await (await AppDatabase.instance).query('lyrics', where: 'track_id = ?', whereArgs: [id]);
@@ -205,7 +281,9 @@ class DatabaseService {
       'offset': ((rows.first['offset_ms'] as int?) ?? 0) / 1000,
     };
   }
-  static Future<void> removeCachedLyrics(String id) => _write((txn) async { await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [id]); });
+  static Future<void> removeCachedLyrics(String id) => _write((txn) async {
+    await txn.update('lyrics', {'lines_json': null}, where: 'track_id = ?', whereArgs: [id]);
+  });
   static Future<void> replacePlaylistsAndLyrics({required List<Playlist> playlists, required Map<String, Map<String, dynamic>> lyrics, Map<String, Track> trackOverrides = const {}, BiliSession? session}) => _write((txn) async {
     final replacement = List<Playlist>.of(playlists);
     if (!replacement.any((p) => p.id == Playlist.favoritesId)) replacement.insert(0, Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []));
@@ -213,11 +291,17 @@ class DatabaseService {
     for (final entry in trackOverrides.entries) {
       final rows = await txn.query('tracks', where: 'id = ?', whereArgs: [entry.key]);
       final existing = rows.isEmpty ? entry.value : Track.fromMap(AppDatabase.decode(rows.first['payload']));
-      await AppDatabase.putTrack(txn, existing.copyWith(title: entry.value.title, uploader: entry.value.uploader), overwrite: true);
+      await AppDatabase.putTrack(txn, existing.copyWith(
+        title: entry.value.title,
+        uploader: entry.value.uploader,
+        coverUrl: entry.value.coverUrl,
+        musicSource: entry.value.musicSource,
+        musicId: entry.value.musicId,
+      ), overwrite: true);
     }
     for (final entry in lyrics.entries) {
       final reference = LyricsReference.fromMap(Map<String, dynamic>.from(entry.value['reference'] as Map));
-      await txn.insert('lyrics', {'track_id': entry.key, 'provider': reference.provider.apiName, 'lyric_id': reference.id, 'title': reference.title, 'artist': reference.artist, 'picture_url': reference.pictureUrl, 'offset_ms': (((entry.value['offset'] as num?) ?? 0) * 1000).round()}, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('lyrics', {'track_id': entry.key, 'provider': reference.provider.apiName, 'lyric_id': reference.id, 'title': reference.title, 'artist': reference.artist, 'picture_url': reference.pictureUrl, 'lines_json': null, 'offset_ms': ((entry.value['offset'] as num) * 1000).round()}, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     if (session != null) await AppDatabase.writeState('session', session.toMap(), executor: txn);
   }, library: true, history: true);

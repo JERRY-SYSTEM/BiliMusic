@@ -20,13 +20,13 @@ void main() {
       fetchVideoInfo: (bvid) async => [Track(id: '${bvid}_p1', bvid: bvid, cid: 11, title: 'network', rawTitle: 'network', uploader: 'network', coverUrl: '', duration: 12)],
       fetchOnlineTracks: (_, __) async => throw const SocketException('offline'),
     );
-    // This is the exact v1 shape emitted by BiliMusic; there is no new envelope.
+    // Current strict backup shape.
     backup = Uint8List.fromList(utf8.encode(jsonEncode({
-      'schemaVersion': 1, 'exportedAt': '2026-09-06T08:00:00.000Z',
+      'schemaVersion': 3, 'exportedAt': '2026-09-06T08:00:00.000Z',
       'session': {'sessData':'test', 'biliJct':'csrf', 'dedeUserId':'1', 'refreshToken':'', 'cookie':'SESSDATA=test'},
       'playlists': [
-        {'id':'favorites', 'name':'收藏', 'isOnline':false, 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手'}]},
-        {'id':'online_42', 'name':'在线', 'isOnline':true, 'remoteId':'42', 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手'}]},
+        {'id':'favorites', 'name':'收藏', 'isOnline':false, 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手', 'musicSource':'netease', 'musicId':'123'}]},
+        {'id':'online_42', 'name':'在线', 'isOnline':true, 'remoteId':'42', 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手', 'musicSource':'netease', 'musicId':'123'}]},
       ],
       'lyrics': {'BVtest_p1':{'reference': {'provider':'netease', 'id':'123'}, 'offset': 0}},
     })));
@@ -47,7 +47,11 @@ void main() {
     expect(favorites.tracks.single.title, '我的歌名');
     expect(await DatabaseService.getLyricsSelection('BVtest_p1'), isNotNull);
     final exported = await service.buildExportJson();
-    expect((jsonDecode(exported) as Map)['schemaVersion'], 1);
+    final exportedMap = jsonDecode(exported) as Map;
+    expect(exportedMap['schemaVersion'], 3);
+    final lyricReference = ((exportedMap['lyrics'] as Map)['BVtest_p1'] as Map)['reference'] as Map;
+    expect(lyricReference.keys, containsAllInOrder(['provider', 'id']));
+    expect(lyricReference, isNot(contains('title')));
     await DatabaseService.removeTrackFromPlaylist('favorites', 'BVtest_p1');
     await service.importBytes(bytes: Uint8List.fromList(utf8.encode(exported)), selection: selection);
     expect((await DatabaseService.getFavoritesPlaylist()).tracks.single.uploader, '我的歌手');
