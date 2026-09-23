@@ -639,17 +639,48 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
             valueListenable: widget.lyricsNotifier,
             builder: (context, lines, _) => ValueListenableBuilder<double>(
               valueListenable: widget.lyricsOffsetNotifier,
-              builder: (context, offset, _) => SyncedLyricsView(
-                lines: _isActive ? lines : const [],
-                positionNotifier: widget.positionNotifier,
-                showTranslation: _showTranslation,
-                offset: offset,
-                onSeek: _isActive
-                    ? (seconds) => widget.handler.seek(
-                          Duration(milliseconds: (seconds * 1000).round()),
-                        )
-                    : null,
-              ),
+              builder: (context, offset, _) {
+                final hasTranslation = lines.any(
+                  (line) => (line.translation ?? '').trim().isNotEmpty,
+                );
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: SyncedLyricsView(
+                        lines: _isActive ? lines : const [],
+                        positionNotifier: widget.positionNotifier,
+                        showTranslation: _showTranslation,
+                        offset: offset,
+                        onSeek: _isActive
+                            ? (seconds) => widget.handler.seek(
+                                  Duration(milliseconds: (seconds * 1000).round()),
+                                )
+                            : null,
+                      ),
+                    ),
+                    if (hasTranslation)
+                      Positioned(
+                        right: 12,
+                        bottom: 8,
+                        child: SafeArea(
+                          top: false,
+                          child: IconButton(
+                            tooltip: _showTranslation ? '隐藏译文' : '显示译文',
+                            color: context.palette.accent.withValues(
+                              alpha: _showTranslation ? 1 : 0.45,
+                            ),
+                            onPressed: () => setState(
+                              () => _showTranslation = !_showTranslation,
+                            ),
+                            icon: const HugeIcon(
+                              icon: HugeIcons.strokeRoundedTranslate,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -658,9 +689,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
           builder: (context, lines, _) => ValueListenableBuilder<bool>(
             valueListenable: widget.hasLyricsReferenceNotifier,
             builder: (context, hasReference, _) {
-            final hasTranslation = lines.any(
-              (line) => (line.translation ?? '').trim().isNotEmpty,
-            );
             return SafeArea(
               top: false,
               child: Row(
@@ -674,31 +702,46 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                   ),
                   IconButton(
                     key: const Key('lyricOffsetBackwardButton'),
-                    tooltip: '歌词提前 0.5 秒',
+                    tooltip: '歌词相对音乐提前 0.5 秒',
                     color: context.palette.accent,
-                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
+                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
                     icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft),
+                  ),
+                  ValueListenableBuilder<double>(
+                    valueListenable: widget.lyricsOffsetNotifier,
+                    builder: (context, offset, _) => SizedBox(
+                      width: 48,
+                      child: Text(
+                        _formatLyricsOffset(offset),
+                        key: const Key('lyricOffsetValue'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: context.palette.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
                   ),
                   IconButton(
                     key: const Key('lyricOffsetForwardButton'),
-                    tooltip: '歌词延后 0.5 秒',
+                    tooltip: '歌词相对音乐延后 0.5 秒',
                     color: context.palette.accent,
-                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
+                    onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
                     icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight),
                   ),
-                  if (hasTranslation) ...[
-                    const SizedBox(width: 20),
-                    IconButton(
-                      tooltip: _showTranslation ? '隐藏译文' : '显示译文',
-                      color: context.palette.accent.withValues(
-                        alpha: _showTranslation ? 1 : 0.45,
-                      ),
-                      onPressed: () => setState(
-                        () => _showTranslation = !_showTranslation,
-                      ),
-                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedTranslate),
+                  IconButton(
+                    key: const Key('lyricOffsetResetButton'),
+                    tooltip: '重置歌词偏移',
+                    color: context.palette.accent,
+                    onPressed: _isActive && hasReference
+                        ? () => _setLyricsOffset(0)
+                        : null,
+                    icon: const HugeIcon(
+                      icon: HugeIcons.strokeRoundedTimerReset,
                     ),
-                  ],
+                  ),
                 ],
               ),
             );
@@ -714,6 +757,21 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     Haptics.selection();
     widget.lyricsOffsetNotifier.value += delta;
     await DatabaseService.adjustLyricsOffset(_displayTrack.id, delta);
+  }
+
+  Future<void> _setLyricsOffset(double value) async {
+    if (!_isActive) return;
+    final delta = value - widget.lyricsOffsetNotifier.value;
+    if (delta.abs() < 0.001) return;
+    Haptics.selection();
+    widget.lyricsOffsetNotifier.value = value;
+    await DatabaseService.adjustLyricsOffset(_displayTrack.id, delta);
+  }
+
+  String _formatLyricsOffset(double offset) {
+    final rounded = double.parse(offset.toStringAsFixed(1));
+    final sign = rounded > 0 ? '+' : '';
+    return '$sign${rounded.toStringAsFixed(1)}';
   }
 
   String _formatPublishTime(int? seconds) {
