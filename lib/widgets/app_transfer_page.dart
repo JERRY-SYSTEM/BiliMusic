@@ -7,6 +7,7 @@ import 'package:hugeicons/hugeicons.dart';
 
 import '../services/app_transfer_service.dart';
 import '../theme/app_theme.dart';
+import 'full_screen_loading_overlay.dart';
 
 class AppTransferPage extends StatefulWidget {
   const AppTransferPage({super.key});
@@ -19,13 +20,16 @@ class _AppTransferPageState extends State<AppTransferPage> {
   final AppTransferService _service = const AppTransferService();
   bool _exporting = false;
   bool _importing = false;
+  String? _progressMessage;
 
   bool get _busy => _exporting || _importing;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('数据导入导出')),
-        body: ListView(
+  Widget build(BuildContext context) => Stack(
+        children: [
+          Scaffold(
+            appBar: AppBar(title: const Text('数据导入导出')),
+            body: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
           children: [
             Container(
@@ -88,7 +92,11 @@ class _AppTransferPageState extends State<AppTransferPage> {
               style: TextStyle(color: context.palette.textMuted),
             ),
           ],
-        ),
+            ),
+          ),
+          if (_progressMessage != null)
+            FullScreenLoadingOverlay(message: _progressMessage!),
+        ],
       );
 
   Future<void> _exportData() async {
@@ -114,6 +122,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
     if (confirmed != true || !mounted) return;
     setState(() => _exporting = true);
     try {
+      if (mounted) setState(() => _progressMessage = '正在导出数据…');
       final json = await _service.buildExportJson();
       final bytes = Uint8List.fromList(utf8.encode(json));
       final path = await FilePicker.saveFile(
@@ -129,7 +138,12 @@ class _AppTransferPageState extends State<AppTransferPage> {
     } catch (error) {
       if (mounted) _showMessage('导出失败：$error');
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() {
+          _exporting = false;
+          _progressMessage = null;
+        });
+      }
     }
   }
 
@@ -174,6 +188,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
         );
         if (replaceSession != true || !mounted) return;
       }
+      if (mounted) setState(() => _progressMessage = '正在导入数据…');
       final importResult = await _service.importBytes(
         bytes: bytes,
         selection: selection,
@@ -189,7 +204,12 @@ class _AppTransferPageState extends State<AppTransferPage> {
     } catch (error) {
       if (mounted) _showMessage('导入失败：$error');
     } finally {
-      if (mounted) setState(() => _importing = false);
+      if (mounted) {
+        setState(() {
+          _importing = false;
+          _progressMessage = null;
+        });
+      }
     }
   }
 

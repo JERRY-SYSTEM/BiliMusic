@@ -309,7 +309,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     ),
                     IconButton(
                       icon: HugeIcon(icon: _currentPlaylist.isOnline
-                          ? HugeIcons.strokeRoundedRefreshDot
+                          ? HugeIcons.strokeRoundedCloudSync
                           : HugeIcons.strokeRoundedAdd01,
                           color: context.palette.textSecondary),
                       tooltip: _currentPlaylist.isOnline ? '同步在线歌单' : '添加本地曲目',
