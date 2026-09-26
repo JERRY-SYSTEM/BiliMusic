@@ -88,7 +88,7 @@ class DatabaseService {
       );
     });
     if (previous != null && previous != path) {
-      await AppDatabase.deleteCoverCacheForUrl(previous!);
+      unawaited(AppDatabase.deleteCoverCacheForUrl(previous!));
     }
   }
   static Future<void> deletePlaylist(String id) => _editPlaylists((all) { if (id != Playlist.favoritesId) all.removeWhere((p) => p.id == id); });

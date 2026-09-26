@@ -107,25 +107,33 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
       _loadingId = candidate.id;
       _error = null;
     });
-    final result = await LyricsEngine.fetchCandidateLyrics(candidate);
-    if (!mounted) return;
-    if (result == null || result.lines.isEmpty) {
+    try {
+      final result = await LyricsEngine.fetchCandidateLyrics(candidate);
+      if (!mounted) return;
+      if (result == null || result.lines.isEmpty) {
+        setState(() {
+          _loadingId = null;
+          _error = '该条目没有可用的同步歌词';
+        });
+        return;
+      }
+      final selection = await showDialog<LyricApplySelection>(
+        context: context,
+        builder: (_) => const _LyricApplyDialog(),
+      );
+      if (selection == null || !mounted) {
+        if (mounted) setState(() => _loadingId = null);
+        return;
+      }
+      await widget.onApply(result, selection);
+      if (mounted) Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
         _loadingId = null;
-        _error = '该条目没有可用的同步歌词';
+        _error = '应用失败：$error';
       });
-      return;
     }
-    final selection = await showDialog<LyricApplySelection>(
-      context: context,
-      builder: (_) => const _LyricApplyDialog(),
-    );
-    if (selection == null || !mounted) {
-      setState(() => _loadingId = null);
-      return;
-    }
-    await widget.onApply(result, selection);
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -252,15 +260,7 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
               color: context.palette.accent12,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: loading
-                ? Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: context.palette.accent,
-                    ),
-                  )
-                : (item.pictureUrl ?? '').isNotEmpty
+            child: (item.pictureUrl ?? '').isNotEmpty
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: CachedCoverImage(
@@ -283,6 +283,15 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          trailing: loading
+              ? SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: context.palette.accent,
+                  ),
+                )
+              : null,
           onTap: _loadingId == null && !_searching ? () => _apply(item) : null,
         );
       },

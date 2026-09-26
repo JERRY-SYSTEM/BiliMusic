@@ -691,6 +691,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                             color: context.palette.accent,
                             onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
                             padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 20, height: 20),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft, size: 19),
                           ),
                           SizedBox(
@@ -713,6 +714,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                                 ? () => _adjustLyricsOffset(-offset)
                                 : null,
                             padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 20, height: 20),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedTimerReset, size: 19),
                           ),
                           IconButton(
@@ -721,6 +723,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                             color: context.palette.accent,
                             onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
                             padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 20, height: 20),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight, size: 19),
                           ),
                         ],

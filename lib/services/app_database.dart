@@ -219,8 +219,12 @@ class AppDatabase {
     for (final path in paths) {
       await db.delete('cover_cache', where: 'path = ?', whereArgs: [path]);
     }
-    await _deleteCoverCaches([track], paths);
-    await _deleteManagedCoverFile(track.coverUrl);
+    unawaited(() async {
+      try {
+        await _deleteCoverCaches([track], paths);
+        await _deleteManagedCoverFile(track.coverUrl);
+      } catch (_) {}
+    }());
     _coverCacheUpdates.add(null);
   }
 
