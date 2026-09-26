@@ -192,7 +192,7 @@ class _QueueRow extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadius.sm),
-                  child: CachedCoverImage(url: track.coverUrl, width: 44, height: 44),
+                  child: CachedCoverImage(url: track.coverUrl, track: track, width: 44, height: 44),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

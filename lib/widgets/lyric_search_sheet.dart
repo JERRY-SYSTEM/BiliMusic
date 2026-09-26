@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hugeicons/hugeicons.dart';
 import '../models/lyric_line.dart';
+import '../models/track.dart';
 import '../services/lyrics_engine.dart';
 import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
@@ -10,6 +11,7 @@ import 'cached_cover_image.dart';
 Future<void> showLyricSearchSheet({
   required BuildContext context,
   required String initialKeyword,
+  required Track track,
   required Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply,
 }) async {
   await showModalBottomSheet<void>(
@@ -21,6 +23,7 @@ Future<void> showLyricSearchSheet({
     ),
     builder: (_) => _LyricSearchSheet(
       initialKeyword: initialKeyword,
+      track: track,
       onApply: onApply,
     ),
   );
@@ -29,10 +32,12 @@ Future<void> showLyricSearchSheet({
 class _LyricSearchSheet extends StatefulWidget {
   const _LyricSearchSheet({
     required this.initialKeyword,
+    required this.track,
     required this.onApply,
   });
 
   final String initialKeyword;
+  final Track track;
   final Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply;
 
   @override
@@ -260,6 +265,7 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                         borderRadius: BorderRadius.circular(8),
                         child: CachedCoverImage(
                           url: item.pictureUrl!,
+                          track: widget.track,
                           width: 44,
                           height: 44,
                         ),
