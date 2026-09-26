@@ -110,7 +110,7 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
                   leading: ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: CachedCoverImage(
-                        url: t.coverUrl, width: 40, height: 40),
+                        url: t.coverUrl, track: t, width: 40, height: 40),
                   ),
                   title: Text(t.title,
                       maxLines: 1,

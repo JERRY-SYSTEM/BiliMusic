@@ -93,7 +93,7 @@ class BilibiliSdk {
           if (pages.isEmpty) {
             return [
               Track(
-                id: '${bvid}_p1',
+                id: Track.idFor(bvid),
                 bvid: bvid,
                 cid: data['cid'] as int? ?? 0,
                 title: title,
@@ -122,7 +122,7 @@ class BilibiliSdk {
             final pageDuration = p['duration'] as int? ?? totalDuration;
 
             return Track(
-              id: '${bvid}_p$pageNo',
+              id: Track.idFor(bvid, pageNo),
               bvid: bvid,
               cid: cid,
               title: pages.length > 1 ? '$title - P$pageNo: $partTitle' : title,
@@ -347,7 +347,7 @@ class BilibiliSdk {
             // same video opened by BV number, i.e. two entries for one song
             // with separate download state.
             tracks.add(Track(
-              id: '${bvid}_p1',
+              id: Track.idFor(bvid),
               bvid: bvid,
               cid: item['cid'] as int? ?? 0,
               title: cleanTitle,

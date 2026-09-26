@@ -268,6 +268,7 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
                 borderRadius: BorderRadius.circular(12),
                 child: CachedCoverImage(
                   url: widget.track.coverUrl,
+                  track: widget.track,
                   width: 60,
                   height: 60,
                 ),

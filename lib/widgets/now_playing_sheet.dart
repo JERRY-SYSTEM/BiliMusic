@@ -407,6 +407,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
             musicSource: reference.provider.apiName,
             musicId: reference.id,
           );
+          TrackEnrichmentService.supersedePending(track.id);
           updated = await DatabaseService.completeTrackEnrichment(
             updated,
             result,
@@ -798,6 +799,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 borderRadius: BorderRadius.circular(AppRadius.xl),
                 child: CachedCoverImage(
                   url: _displayTrack.coverUrl,
+                  track: _displayTrack,
                   width: size,
                   height: size,
                 ),

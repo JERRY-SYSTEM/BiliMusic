@@ -15,6 +15,11 @@ class Track {
   /// `bvid_<cid>` from a BV number — with separate library entries and
   /// separate downloads. The page number is known on both paths.
   final String id;
+
+  static String idFor(String bvid, [int page = 1]) {
+    final compact = bvid.startsWith('BV1') ? bvid.substring(3) : bvid;
+    return page == 1 ? compact : '${compact}_p$page';
+  }
   final String bvid;
   final int cid;
   final String title;

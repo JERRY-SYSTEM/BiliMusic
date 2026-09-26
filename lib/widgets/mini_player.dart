@@ -168,6 +168,7 @@ class MiniPlayer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppRadius.md),
                   child: CachedCoverImage(
                     url: track.coverUrl,
+                    track: track,
                     width: _artSize,
                     height: _artSize,
                   ),

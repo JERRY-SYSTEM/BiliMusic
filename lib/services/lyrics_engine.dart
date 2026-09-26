@@ -13,6 +13,18 @@ class _ArtistResolution {
   final int bonus;
 }
 
+class LyricsRequestException implements Exception {
+  const LyricsRequestException(this.message, {this.code});
+
+  final String message;
+  final int? code;
+
+  @override
+  String toString() => code == null
+      ? 'LyricsRequestException: $message'
+      : 'LyricsRequestException($code): $message';
+}
+
 class LyricsEngine {
   static final HttpClient _client = biliHttpClient();
   static final Map<String, Future<String?>> _neteasePictureCache = {};
@@ -24,18 +36,26 @@ class LyricsEngine {
     return raw.replaceFirst('http:', 'https:');
   }
 
-  static Future<String?> _fetchNetEasePictureUrl(String id) {
-    return _neteasePictureCache.putIfAbsent(id, () async {
+  static Future<String?> _fetchNetEasePictureUrl(String id) async {
+    final future = _neteasePictureCache.putIfAbsent(id, () async {
       final body = await _httpGet(
         'https://music.163.com/api/song/detail?ids=%5B${Uri.encodeComponent(id)}%5D',
         headers: const {'Referer': 'https://music.163.com'},
       );
       if (body == null) return null;
-      final songs = jsonDecode(body)['songs'] as List? ?? const [];
+      final songs = _decodeNetEaseResponse(body)['songs'] as List? ?? const [];
       if (songs.isEmpty || songs.first is! Map) return null;
       final album = (songs.first as Map)['album'];
       return _normalizePictureUrl(album is Map ? album['picUrl'] : null);
     });
+    try {
+      return await future;
+    } catch (_) {
+      if (identical(_neteasePictureCache[id], future)) {
+        _neteasePictureCache.remove(id);
+      }
+      rethrow;
+    }
   }
 
   static Future<String?> _httpGet(String urlStr, {Map<String, String>? headers}) async {
@@ -50,10 +70,28 @@ class LyricsEngine {
       // maxConnectionsPerHost = 4, a few un-drained 4xx/5xx responses would
       // exhaust it and later requests would queue behind idleTimeout.
       await res.drain<void>();
+      throw LyricsRequestException(
+        'HTTP request failed',
+        code: res.statusCode,
+      );
     } catch (e) {
       debugPrint('Lyrics HTTP error: $e');
+      if (e is LyricsRequestException) rethrow;
+      throw LyricsRequestException(e.toString());
     }
-    return null;
+  }
+
+  static Map<String, dynamic> _decodeNetEaseResponse(String body) {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) {
+      throw const LyricsRequestException('NetEase response is not an object');
+    }
+    final json = Map<String, dynamic>.from(decoded);
+    final code = (json['code'] as num?)?.toInt();
+    if (code != null && code != 200) {
+      throw LyricsRequestException('NetEase API request failed', code: code);
+    }
+    return json;
   }
 
   static Future<List<LyricSearchCandidate>> searchCandidates(
@@ -71,7 +109,7 @@ class LyricsEngine {
           );
           final songs = body == null
               ? const []
-              : (jsonDecode(body)['result']?['songs'] as List? ?? const []);
+              : (_decodeNetEaseResponse(body)['result']?['songs'] as List? ?? const []);
           final candidates = await Future.wait(songs.whereType<Map>().map((song) async {
             final id = song['id']?.toString() ?? '';
             final artists = (song['artists'] as List? ?? const [])
@@ -957,7 +995,11 @@ class LyricsEngine {
   }
 
   // NetEase Cloud Music Provider (Best Chinese coverage)
-  static Future<LyricsResult?> fetchFromNetEase(String title, {String? artist}) async {
+  static Future<LyricsResult?> fetchFromNetEase(
+    String title, {
+    String? artist,
+    bool throwOnRequestError = false,
+  }) async {
     final queries = [
       if (artist != null && artist.isNotEmpty) '$artist $title',
       title,
@@ -968,7 +1010,7 @@ class LyricsEngine {
       try {
         final searchBody = await _httpGet(searchUrl, headers: {'Referer': 'https://music.163.com'});
         if (searchBody != null) {
-          final json = jsonDecode(searchBody);
+          final json = _decodeNetEaseResponse(searchBody);
           final songs = json['result']?['songs'] as List? ?? [];
           // Prefer the song whose artist appears in the query: "周深 不舍"
           // must yield 周深's 不舍, not the most popular 不舍 (a cover by
@@ -986,7 +1028,7 @@ class LyricsEngine {
 
             final lyricBody = await _httpGet(lyricUrl, headers: {'Referer': 'https://music.163.com'});
             if (lyricBody != null) {
-              final lyricJson = jsonDecode(lyricBody);
+              final lyricJson = _decodeNetEaseResponse(lyricBody);
               final rawLrc = (lyricJson['lrc']?['lyric'] ?? '') as String;
               final rawTrans = (lyricJson['tlyric']?['lyric'] ?? '') as String;
 
@@ -1074,6 +1116,7 @@ class LyricsEngine {
         }
       } catch (e) {
         debugPrint('NetEase lyrics fetch error: $e');
+        if (throwOnRequestError) rethrow;
       }
     }
 
@@ -1087,7 +1130,11 @@ class LyricsEngine {
     final artist = cleaned['artist'];
 
     // Step 1: NetEase (best Chinese coverage)
-    final neteaseResult = await fetchFromNetEase(title, artist: artist);
+    final neteaseResult = await fetchFromNetEase(
+      title,
+      artist: artist,
+      throwOnRequestError: true,
+    );
     if (neteaseResult != null && neteaseResult.lines.isNotEmpty) {
       return neteaseResult;
     }
