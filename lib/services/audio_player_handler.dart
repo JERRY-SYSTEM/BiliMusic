@@ -651,17 +651,42 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
 
     _emitQueue();
-    // Reorder only the children that are actually in the native window. The
-    // active child is never replaced, so playback remains gapless.
-    final nativeOld = oldIndex - _queueBaseIndex;
-    final nativeNew = resolved - _queueBaseIndex;
-    if (nativeOld >= 0 && nativeOld < _queueSource.length &&
-        nativeNew >= 0 && nativeNew < _queueSource.length) {
-      await _queueSource.move(nativeOld, nativeNew);
+
+    // A reorder can move an item across the small native prefetch window. In
+    // that case the old children are no longer a contiguous slice of the new
+    // logical queue (CABDE may still have native [A, B], for example). Keep
+    // only the currently playing child, re-anchor it at its new logical index,
+    // then prefetch the new successor. Removing surrounding children does not
+    // interrupt the active audio.
+    final nativeCurrent = _player.currentIndex;
+    if (activeId != null &&
+        nativeCurrent != null &&
+        nativeCurrent >= 0 &&
+        nativeCurrent < _queueSource.length) {
+      final child = _queueSource.children[nativeCurrent];
+      final tag = child is ja.IndexedAudioSource ? child.tag : null;
+      if (tag is Track && tag.id == activeId) {
+        _isRebuilding = true;
+        try {
+          if (_queueSource.length > nativeCurrent + 1) {
+            await _queueSource.removeRange(
+              nativeCurrent + 1,
+              _queueSource.length,
+            );
+          }
+          if (nativeCurrent > 0) {
+            await _queueSource.removeRange(0, nativeCurrent);
+          }
+          _queueBaseIndex = _currentIndex;
+          _prefetchingId = null;
+        } finally {
+          _isRebuilding = false;
+        }
+        _reconcileActiveTrack();
+        unawaited(_prefetchNext());
+      }
     }
     _schedulePersist(immediate: true);
-    unawaited(_trimQueueAfterCurrent());
-    unawaited(_prefetchNext());
   }
 
   Future<void> clearQueue() async {
@@ -693,24 +718,31 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _userPaused = false;
     final playerIndex = index - _queueBaseIndex;
     if (playerIndex >= 0 && playerIndex < _queueSource.length) {
-      _currentIndex = index;
-      // Broadcast immediately: the currentIndexStream listener's
-      // `logical == _currentIndex` guard would swallow the echo from the
-      // seek below, so without this the UI never learns the track changed.
-      _positionController.add(Duration.zero);
-      _onActiveTrackChanged(_playlist[index]);
-      await _player.seek(Duration.zero, index: playerIndex);
-      // Seeking to a child after the previous item completed does not always
-      // clear just_audio's completed/playWhenReady state. Explicit navigation
-      // must actively start the selected child, otherwise the UI advances
-      // while the old audio remains at (or restarts from) its end position.
-      _requestPlay();
-      // currentIndexStream is asynchronous and can be suppressed by a
-      // just_audio implementation when seeking to an already queued item.
-      // Reconcile after the seek as well, so the UI cannot remain on the
-      // previous track when the audio has already moved on.
-      _reconcileActiveTrack();
-      return;
+      final child = _queueSource.children[playerIndex];
+      final tag = child is ja.IndexedAudioSource ? child.tag : null;
+      // Index arithmetic is only safe while the native window still mirrors
+      // the logical queue. A reorder or an in-flight prefetch can briefly make
+      // the numbers line up while the actual child is a different song.
+      if (tag is Track && tag.id == _playlist[index].id) {
+        _currentIndex = index;
+        // Broadcast immediately: the currentIndexStream listener's
+        // `logical == _currentIndex` guard would swallow the echo from the
+        // seek below, so without this the UI never learns the track changed.
+        _positionController.add(Duration.zero);
+        _onActiveTrackChanged(_playlist[index]);
+        await _player.seek(Duration.zero, index: playerIndex);
+        // Seeking to a child after the previous item completed does not always
+        // clear just_audio's completed/playWhenReady state. Explicit navigation
+        // must actively start the selected child, otherwise the UI advances
+        // while the old audio remains at (or restarts from) its end position.
+        _requestPlay();
+        // currentIndexStream is asynchronous and can be suppressed by a
+        // just_audio implementation when seeking to an already queued item.
+        // Reconcile after the seek as well, so the UI cannot remain on the
+        // previous track when the audio has already moved on.
+        _reconcileActiveTrack();
+        return;
+      }
     }
     _currentIndex = index;
     _queueManager.recordVisit(queue: _playlist, index: index, shuffle: _isShuffle);
@@ -852,6 +884,23 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     _reconcileActiveTrack();
     _emitQueue();
     _schedulePersist(immediate: true);
+  }
+
+  /// Appends tracks to the end of the logical playback queue without
+  /// interrupting the current track. Downloads remain lazy: only the next
+  /// playable item is prefetched by the existing queue window.
+  Future<void> appendToQueue(List<Track> tracks) async {
+    if (tracks.isEmpty) return;
+
+    _playlist.addAll(tracks);
+    _naturalOrder.addAll(tracks);
+    _queueManager.syncAfterQueueChange(
+      queue: _playlist,
+      currentIndex: _currentIndex,
+    );
+    _emitQueue();
+    _schedulePersist(immediate: true);
+    unawaited(_prefetchNext());
   }
 
   // ---------------------------------------------------------------------------

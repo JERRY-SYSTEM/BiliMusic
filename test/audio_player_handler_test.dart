@@ -16,6 +16,18 @@ const second = Track(
   id: 'b', bvid: 'b', cid: 2, title: 'Second', rawTitle: 'Second',
   uploader: 'Artist', coverUrl: '', duration: 10,
 );
+const third = Track(
+  id: 'c', bvid: 'c', cid: 3, title: 'Third', rawTitle: 'Third',
+  uploader: 'Artist', coverUrl: '', duration: 10,
+);
+const fourth = Track(
+  id: 'd', bvid: 'd', cid: 4, title: 'Fourth', rawTitle: 'Fourth',
+  uploader: 'Artist', coverUrl: '', duration: 10,
+);
+const fifth = Track(
+  id: 'e', bvid: 'e', cid: 5, title: 'Fifth', rawTitle: 'Fifth',
+  uploader: 'Artist', coverUrl: '', duration: 10,
+);
 
 /// Models just_audio's long-lived play Future and its playing=true at EOF.
 /// The fake does not attach sources to a platform, so queue edits stay local.
@@ -143,7 +155,7 @@ void main() {
   });
 
   test('start returns and prefetch runs while play Future is pending', () async {
-    await handler.playTrack(first, newQueue: [first, second])
+    await handler.playTrack(first, newQueue: [first, second, third, fourth, fifth])
         .timeout(const Duration(seconds: 1));
     await flushEvents();
 
@@ -255,6 +267,20 @@ void main() {
     expect(handler.playbackState.value.playing, isFalse);
     await handler.play().timeout(const Duration(seconds: 1));
     await flushEvents();
+    expect(handler.isPlaying, isTrue);
+  });
+
+  test('appending tracks adds them to the queue tail without changing playback',
+      () async {
+    await handler.playTrack(first, newQueue: [first])
+        .timeout(const Duration(seconds: 1));
+
+    await handler.appendToQueue([second]);
+    await flushEvents();
+
+    expect(handler.playbackQueue.map((track) => track.id), ['a', 'b']);
+    expect(handler.currentTrack?.id, first.id);
+    expect(handler.currentQueueIndex, 0);
     expect(handler.isPlaying, isTrue);
   });
 

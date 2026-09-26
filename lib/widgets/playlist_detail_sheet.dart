@@ -28,6 +28,7 @@ class PlaylistDetailSheet extends StatefulWidget {
   final TrackAction? onPlayOnly;
   final Future<void> Function(Track track)? onPlayNext;
   final void Function(List<Track> tracks, {bool shuffle})? onPlayCollection;
+  final Future<void> Function(List<Track> tracks)? onAddToQueue;
   final VoidCallback? onPlaylistUpdated;
   final VoidCallback? onClose;
   final Future<void> Function(Playlist playlist)? onSyncOnline;
@@ -39,6 +40,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     this.onPlayOnly,
     this.onPlayNext,
     this.onPlayCollection,
+    this.onAddToQueue,
     this.onPlaylistUpdated,
     this.onClose,
     this.onSyncOnline,
@@ -51,6 +53,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     TrackAction? onPlayOnly,
     Future<void> Function(Track track)? onPlayNext,
     void Function(List<Track> tracks, {bool shuffle})? onPlayCollection,
+    Future<void> Function(List<Track> tracks)? onAddToQueue,
     VoidCallback? onPlaylistUpdated,
     VoidCallback? onClose,
     Future<void> Function(Playlist playlist)? onSyncOnline,
@@ -66,6 +69,7 @@ class PlaylistDetailSheet extends StatefulWidget {
         onPlayOnly: onPlayOnly,
         onPlayNext: onPlayNext,
         onPlayCollection: onPlayCollection,
+        onAddToQueue: onAddToQueue,
         onPlaylistUpdated: onPlaylistUpdated,
         onClose: onClose ?? () => Navigator.pop(context),
         onSyncOnline: onSyncOnline,
@@ -328,26 +332,82 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: ElevatedButton.icon(
-                  onPressed: (_playableQueue.isEmpty ||
-                          widget.onPlayCollection == null)
-                      ? null
-                      : () {
-                          Haptics.medium();
-                          widget.onPlayCollection?.call(_playableQueue,
-                              shuffle: false);
-                        },
-                icon: const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02, size: 22),
-                  label: const Text('播放全部',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: context.palette.accent,
-                    foregroundColor: context.palette.textPrimary,
-                    minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: (_playableQueue.isEmpty ||
+                                widget.onPlayCollection == null)
+                            ? null
+                            : () {
+                                Haptics.medium();
+                                widget.onPlayCollection?.call(
+                                  _playableQueue,
+                                  shuffle: false,
+                                );
+                              },
+                        icon: const HugeIcon(
+                          icon: HugeIcons.strokeRoundedPlayCircle02,
+                          size: 22,
+                        ),
+                        label: const Text(
+                          '播放全部',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.palette.accent,
+                          foregroundColor: context.palette.textPrimary,
+                          minimumSize: const Size.fromHeight(44),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: (_playableQueue.isEmpty ||
+                                widget.onAddToQueue == null)
+                            ? null
+                            : () async {
+                                Haptics.medium();
+                                final tracks = _playableQueue;
+                                await widget.onAddToQueue!(tracks);
+                                if (!context.mounted) return;
+                                showAppSnackBar(
+                                  ScaffoldMessenger.of(context),
+                                  message: '已添加 ${tracks.length} 首到播放队列',
+                                );
+                              },
+                        icon: const HugeIcon(
+                          icon: HugeIcons.strokeRoundedPropertyAdd,
+                          size: 22,
+                        ),
+                        label: const Text(
+                          '添加到队列',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: context.palette.accent14,
+                          foregroundColor: context.palette.accent,
+                          minimumSize: const Size.fromHeight(44),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          side: BorderSide(color: context.palette.accent30),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
