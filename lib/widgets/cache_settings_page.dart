@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../services/app_database.dart';
 import '../services/cache_inventory.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
@@ -15,8 +18,14 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   final Set<String> _selected = <String>{};
   bool _loading = true;
   bool _busy = false;
+  StreamSubscription<void>? _coverCacheSubscription;
 
-  @override void initState() { super.initState(); _reload(); }
+  @override void initState() {
+    super.initState();
+    _coverCacheSubscription = AppDatabase.coverCacheUpdateStream.listen((_) => _reload());
+    _reload();
+  }
+  @override void dispose() { _coverCacheSubscription?.cancel(); super.dispose(); }
   Future<void> _reload() async {
     final buckets = await CacheInventory.load(await DatabaseService.getDownloadedTracks());
     if (mounted) setState(() { _buckets = buckets; _loading = false; });
@@ -25,7 +34,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   int get _selectedBytes => _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__')).fold(0, (sum, b) => sum + b.bytes);
 
   Future<void> _deleteSelected() async {
-    if (_busy || _selectedBytes == 0) return;
+    if (_busy || _selected.isEmpty) return;
     final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: const Text('删除所选缓存？'),
       content: Text('将删除 ${_selected.length} 个缓存项目，共约 ${_formatBytes(_selectedBytes)}。'),
@@ -36,12 +45,17 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     try {
       for (final bucket in _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__'))) {
         if (bucket.track != null) {
-          await DatabaseService.removeDownloadedTrack(bucket.track!);
+          if ((await AppDatabase.downloads(trackId: bucket.track!.id)).isNotEmpty) {
+            await DatabaseService.removeDownloadedTrack(bucket.track!);
+          }
           await DatabaseService.removeCachedLyrics(bucket.track!.id);
         }
         for (final id in bucket.lyricTrackIds) { await DatabaseService.removeCachedLyrics(id); }
         for (final file in [...bucket.files, ...bucket.coverFiles]) {
           if (await file.exists()) await file.delete();
+        }
+        if (bucket.track != null) {
+          await AppDatabase.forgetCoverCachesForTrack(bucket.track!.id);
         }
       }
       _selected.clear();
@@ -88,7 +102,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
                   child: SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected,
+                      onPressed: _busy || _selected.isEmpty ? null : _deleteSelected,
                       icon: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02),
                       label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}'),
                     ),

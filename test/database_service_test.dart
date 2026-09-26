@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:bilimusic/models/bili_session.dart';
@@ -9,6 +10,8 @@ import 'package:bilimusic/services/app_settings_service.dart';
 import 'package:bilimusic/services/audio_download_service.dart';
 import 'package:bilimusic/services/bili_auth_service.dart';
 import 'package:bilimusic/services/database_service.dart';
+import 'package:bilimusic/services/lyrics_engine.dart';
+import 'package:bilimusic/services/track_enrichment_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -124,6 +127,7 @@ void main() {
   test('track enrichment atomically stores catalog identity, cover and lyrics', () async {
     final original = track('enriched');
     await DatabaseService.addTrackToPlaylist(Playlist.favoritesId, original);
+    await DatabaseService.markAutoCoverMatchMiss(original.id);
     final result = LyricsResult(
       source: 'netease',
       songTitle: '歌名',
@@ -141,6 +145,138 @@ void main() {
     expect(saved.musicId, '100');
     expect(saved.coverUrl, 'https://example.com/cover.jpg');
     expect((await DatabaseService.getCachedLyrics(saved.id))!.lines.single.text, '歌词');
+    expect(await DatabaseService.hasAutoCoverMatchMiss(saved.id), isFalse);
+  });
+
+  test('missing automatic-cover marker table is repaired without an upgrade', () async {
+    final db = await AppDatabase.instance;
+    await db.execute('DROP TABLE auto_cover_match_misses');
+
+    await DatabaseService.markAutoCoverMatchMiss('repair-marker');
+    expect(await DatabaseService.hasAutoCoverMatchMiss('repair-marker'), isTrue);
+
+    await db.execute('DROP TABLE auto_cover_match_misses');
+    await AppDatabase.close();
+    final reopened = await AppDatabase.instance;
+    expect(await reopened.query('auto_cover_match_misses'), isEmpty);
+
+    final original = track('repair-completion');
+    await reopened.execute('DROP TABLE auto_cover_match_misses');
+    await DatabaseService.completeTrackEnrichment(
+      original,
+      LyricsResult(
+        source: 'netease',
+        lines: [LyricLine(time: 0, text: '歌词')],
+        reference: const LyricsReference(
+          provider: LyricProvider.netease,
+          id: 'repair',
+        ),
+      ),
+    );
+    expect(await DatabaseService.hasAutoCoverMatchMiss(original.id), isFalse);
+  });
+
+  test('a completed automatic search with no match is persisted and skipped', () async {
+    final original = track('no-cover-match');
+    var calls = 0;
+    Future<LyricsResult> noMatch(String _) async {
+      calls++;
+      return const LyricsResult(source: 'none', lines: []);
+    }
+
+    expect(
+      await TrackEnrichmentService.enrichForTesting(original, noMatch),
+      isNull,
+    );
+    expect(await DatabaseService.hasAutoCoverMatchMiss(original.id), isTrue);
+
+    await AppDatabase.close();
+    expect(
+      await TrackEnrichmentService.enrichForTesting(original, noMatch),
+      isNull,
+    );
+    expect(calls, 1);
+  });
+
+  test('an automatic search error is not persisted and retries next time', () async {
+    final original = track('cover-match-error');
+    var calls = 0;
+    Future<LyricsResult> fail(String _) async {
+      calls++;
+      throw const LyricsRequestException(
+        'temporary provider error',
+        code: 503,
+      );
+    }
+
+    expect(
+      await TrackEnrichmentService.enrichForTesting(original, fail),
+      isNull,
+    );
+    expect(await DatabaseService.hasAutoCoverMatchMiss(original.id), isFalse);
+    expect(
+      await TrackEnrichmentService.enrichForTesting(original, fail),
+      isNull,
+    );
+    expect(calls, 2);
+  });
+
+  test('a matched song without artwork is remembered as a cover miss', () async {
+    final original = track('matched-without-cover');
+    var calls = 0;
+    Future<LyricsResult> matchWithoutCover(String _) async {
+      calls++;
+      return LyricsResult(
+        source: 'netease',
+        lines: [LyricLine(time: 0, text: '歌词')],
+        reference: const LyricsReference(
+          provider: LyricProvider.netease,
+          id: 'song-without-cover',
+        ),
+      );
+    }
+
+    final updated = await TrackEnrichmentService.enrichForTesting(
+      original,
+      matchWithoutCover,
+    );
+    expect(updated, isNotNull);
+    expect(updated!.coverUrl, isEmpty);
+    expect(await DatabaseService.hasAutoCoverMatchMiss(original.id), isTrue);
+
+    expect(
+      await TrackEnrichmentService.enrichForTesting(
+        original,
+        matchWithoutCover,
+      ),
+      isNull,
+    );
+    expect(calls, 1);
+  });
+
+  test('a manual choice supersedes an older automatic database write', () async {
+    final original = track('manual-wins');
+    final started = Completer<void>();
+    final automaticResult = Completer<LyricsResult>();
+    final pending = TrackEnrichmentService.enrichForTesting(original, (_) {
+      started.complete();
+      return automaticResult.future;
+    });
+    await started.future;
+
+    TrackEnrichmentService.supersedePending(original.id);
+    automaticResult.complete(LyricsResult(
+      source: 'netease',
+      lines: [LyricLine(time: 0, text: '自动匹配')],
+      reference: const LyricsReference(
+        provider: LyricProvider.netease,
+        id: 'automatic',
+        pictureUrl: 'https://example.com/automatic.jpg',
+      ),
+    ));
+
+    expect(await pending, isNull);
+    expect(await DatabaseService.getLyricsReference(original.id), isNull);
   });
 
   test('settings, session, shuffle and duplicate queue entries survive restart', () async {
