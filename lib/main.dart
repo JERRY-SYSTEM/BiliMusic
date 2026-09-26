@@ -709,6 +709,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           onPlayOnly: _onPlayTrackOnly,
                           onPlayNext: _audioHandler.playNext,
                           onPlayCollection: _playCollection,
+                          onAddToQueue: _audioHandler.appendToQueue,
                           onSyncOnline: _syncOnlinePlaylist,
                           onPlaylistUpdated: _loadHistory,
                           onClose: () =>
