@@ -14,6 +14,7 @@ class TrackEnrichmentService {
   TrackEnrichmentService._();
 
   static final Map<String, Future<Track?>> _inFlight = {};
+  static final Map<String, int> _revisions = {};
   static final StreamController<Track> _updates = StreamController.broadcast();
   static Stream<Track> get updates => _updates.stream;
 
@@ -31,6 +32,7 @@ class TrackEnrichmentService {
     Future<LyricsResult> Function(String rawTitle) autoFetchLyrics,
   ) {
     return _inFlight.putIfAbsent(track.id, () async {
+      final revision = _revisions[track.id] ?? 0;
       try {
         if (await DatabaseService.hasAutoCoverMatchMiss(track.id)) {
           return null;
@@ -74,6 +76,7 @@ class TrackEnrichmentService {
         if (result == null ||
             result.reference == null ||
             result.lines.isEmpty) {
+          if ((_revisions[track.id] ?? 0) != revision) return null;
           // For an automatic catalog lookup, reaching this branch means the
           // provider answered normally but no usable match was found.
           // Exceptions take the catch path below and remain retryable.
@@ -82,6 +85,7 @@ class TrackEnrichmentService {
           }
           return null;
         }
+        if ((_revisions[track.id] ?? 0) != revision) return null;
         final updated =
             await DatabaseService.completeTrackEnrichment(track, result);
         if (updated.coverUrl.isEmpty) {
@@ -95,6 +99,12 @@ class TrackEnrichmentService {
         _inFlight.remove(track.id);
       }
     });
+  }
+
+  /// Prevents an older automatic lookup from writing after the user has
+  /// explicitly selected a different catalog entry.
+  static void supersedePending(String trackId) {
+    _revisions[trackId] = (_revisions[trackId] ?? 0) + 1;
   }
 
   static void enrichInBackground(Track track) {

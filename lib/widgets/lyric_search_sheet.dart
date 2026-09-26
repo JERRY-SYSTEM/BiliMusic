@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:hugeicons/hugeicons.dart';
 import '../models/lyric_line.dart';
-import '../models/track.dart';
 import '../services/lyrics_engine.dart';
 import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
@@ -11,7 +10,6 @@ import 'cached_cover_image.dart';
 Future<void> showLyricSearchSheet({
   required BuildContext context,
   required String initialKeyword,
-  required Track track,
   required Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply,
 }) async {
   await showModalBottomSheet<void>(
@@ -23,7 +21,6 @@ Future<void> showLyricSearchSheet({
     ),
     builder: (_) => _LyricSearchSheet(
       initialKeyword: initialKeyword,
-      track: track,
       onApply: onApply,
     ),
   );
@@ -32,12 +29,10 @@ Future<void> showLyricSearchSheet({
 class _LyricSearchSheet extends StatefulWidget {
   const _LyricSearchSheet({
     required this.initialKeyword,
-    required this.track,
     required this.onApply,
   });
 
   final String initialKeyword;
-  final Track track;
   final Future<void> Function(LyricsResult result, LyricApplySelection selection) onApply;
 
   @override
@@ -102,30 +97,33 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
   }
 
   Future<void> _apply(LyricSearchCandidate candidate) async {
+    if (_loadingId != null) return;
     Haptics.selection();
     setState(() {
       _loadingId = candidate.id;
       _error = null;
     });
-    final result = await LyricsEngine.fetchCandidateLyrics(candidate);
-    if (!mounted) return;
-    if (result == null || result.lines.isEmpty) {
-      setState(() {
-        _loadingId = null;
-        _error = '该条目没有可用的同步歌词';
-      });
-      return;
+    try {
+      final result = await LyricsEngine.fetchCandidateLyrics(candidate);
+      if (!mounted) return;
+      if (result == null || result.lines.isEmpty) {
+        setState(() => _error = '该条目没有可用的同步歌词');
+        return;
+      }
+      final selection = await showDialog<LyricApplySelection>(
+        context: context,
+        builder: (_) => const _LyricApplyDialog(),
+      );
+      if (selection == null || !mounted) return;
+      await widget.onApply(result, selection);
+      if (mounted) Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = '应用失败：$error');
+      }
+    } finally {
+      if (mounted) setState(() => _loadingId = null);
     }
-    final selection = await showDialog<LyricApplySelection>(
-      context: context,
-      builder: (_) => const _LyricApplyDialog(),
-    );
-    if (selection == null || !mounted) {
-      setState(() => _loadingId = null);
-      return;
-    }
-    await widget.onApply(result, selection);
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -252,26 +250,17 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
               color: context.palette.accent12,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: loading
-                ? Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: context.palette.accent,
+            child: (item.pictureUrl ?? '').isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CachedCoverImage(
+                      url: item.pictureUrl!,
+                      width: 44,
+                      height: 44,
                     ),
                   )
-                : (item.pictureUrl ?? '').isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: CachedCoverImage(
-                          url: item.pictureUrl!,
-                          track: widget.track,
-                          width: 44,
-                          height: 44,
-                        ),
-                      )
-                    : Icon(Icons.music_note_rounded,
-                        color: context.palette.accent),
+                : Icon(Icons.music_note_rounded,
+                    color: context.palette.accent),
           ),
           title: Text(
             item.title.trim().isEmpty ? '未知歌曲' : item.title.trim(),
@@ -283,6 +272,15 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          trailing: loading
+              ? SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: context.palette.accent,
+                  ),
+                )
+              : null,
           onTap: _loadingId == null && !_searching ? () => _apply(item) : null,
         );
       },

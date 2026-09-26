@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:bilimusic/models/bili_session.dart';
@@ -223,6 +224,31 @@ void main() {
       isNull,
     );
     expect(calls, 1);
+  });
+
+  test('a manual choice supersedes an older automatic database write', () async {
+    final original = track('manual-wins');
+    final started = Completer<void>();
+    final automaticResult = Completer<LyricsResult>();
+    final pending = TrackEnrichmentService.enrichForTesting(original, (_) {
+      started.complete();
+      return automaticResult.future;
+    });
+    await started.future;
+
+    TrackEnrichmentService.supersedePending(original.id);
+    automaticResult.complete(LyricsResult(
+      source: 'netease',
+      lines: [LyricLine(time: 0, text: '自动匹配')],
+      reference: const LyricsReference(
+        provider: LyricProvider.netease,
+        id: 'automatic',
+        pictureUrl: 'https://example.com/automatic.jpg',
+      ),
+    ));
+
+    expect(await pending, isNull);
+    expect(await DatabaseService.getLyricsReference(original.id), isNull);
   });
 
   test('settings, session, shuffle and duplicate queue entries survive restart', () async {

@@ -391,7 +391,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       await showLyricSearchSheet(
         context: context,
         initialKeyword: track.title.trim(),
-        track: track,
         onApply: (result, selection) async {
           final reference = result.reference;
           if (reference == null) return;
@@ -408,6 +407,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
             musicSource: reference.provider.apiName,
             musicId: reference.id,
           );
+          TrackEnrichmentService.supersedePending(track.id);
           updated = await DatabaseService.completeTrackEnrichment(
             updated,
             result,
