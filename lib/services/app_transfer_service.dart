@@ -94,22 +94,14 @@ class AppTransferService {
   Future<String> buildExportJson() async {
     await _auth.initialize();
     final playlists = await DatabaseService.getPlaylists();
-    final referencedIds = playlists
-        .expand((playlist) => playlist.tracks)
-        .map((track) => track.id)
-        .toSet();
-    final lyrics = <String, Map<String, dynamic>>{};
-    for (final trackId in referencedIds) {
-      final selection = await DatabaseService.getLyricsSelection(trackId);
-      if (selection != null) {
-        final reference = Map<String, dynamic>.from(selection['reference'] as Map);
-        lyrics[trackId] = {
-          'reference': {
-            'provider': reference['provider'],
-            'id': reference['id'],
-          },
-          'offset': selection['offset'],
-        };
+    final lyricReferences = <String, List<String>>{};
+    for (final track in playlists.expand((playlist) => playlist.tracks)) {
+      if (lyricReferences.containsKey(track.id)) continue;
+      final selection = await DatabaseService.getLyricsSelection(track.id);
+      final raw = selection?['reference'];
+      if (raw is Map) {
+        final reference = Map<String, dynamic>.from(raw);
+        lyricReferences[track.id] = [reference['provider'] as String, reference['id'] as String];
       }
     }
     final session = _auth.session;
@@ -117,10 +109,9 @@ class AppTransferService {
       'schemaVersion': schemaVersion,
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
       if (session != null && session.isLoggedIn) 'session': session.toMap(),
-      'playlists': playlists.map(_playlistToJson).toList(),
-      'lyrics': lyrics,
+      'playlists': playlists.map((p) => _playlistToJson(p, lyricReferences)).toList(),
     };
-    return const JsonEncoder.withIndent('  ').convert(bundle);
+    return jsonEncode(bundle);
   }
 
   AppImportPreview previewImport(Uint8List bytes) {
@@ -385,25 +376,32 @@ class AppTransferService {
     }
   }
 
-  Map<String, dynamic> _playlistToJson(Playlist playlist) => {
-        'id': playlist.id,
+  Map<String, dynamic> _playlistToJson(Playlist playlist, Map<String, List<String>> lyrics) => {
+        'id': playlist.isOnline ? (playlist.remoteId ?? _stripOnlinePrefix(playlist.id)) : playlist.id,
         'name': playlist.name,
         'isOnline': playlist.isOnline,
-        if (playlist.remoteId != null) 'remoteId': playlist.remoteId,
         'tracks': playlist.tracks
             .map(
               (track) => {
-                'id': track.id,
+                'id': _compactTrackId(track.id),
                 'bvid': track.bvid,
                 'cid': track.cid,
                 'title': track.title,
-                'uploader': track.uploader,
-                'musicSource': track.musicSource,
-                'musicId': track.musicId,
+                'author': track.uploader,
+                'cover': [track.musicSource, track.musicId],
+                'lyrics': lyrics[track.id] ?? const ['', ''],
               },
             )
             .toList(),
       };
+
+  static String _stripOnlinePrefix(String id) => id.startsWith('online_') ? id.substring(7) : id;
+
+  static String _compactTrackId(String id) {
+    var result = id.endsWith('_p1') ? id.substring(0, id.length - 3) : id;
+    if (result.startsWith('BV1')) result = result.substring(3);
+    return result;
+  }
 
   Playlist _copyPlaylist(Playlist playlist) => Playlist(
         id: playlist.id,
@@ -461,27 +459,15 @@ class AppTransferService {
           throw const AppTransferException('备份中的登录信息不完整');
         }
       }
-      final lyrics = <String, Map<String, dynamic>>{};
-      final rawLyrics = json['lyrics'];
-      if (rawLyrics is! Map) {
-        throw const AppTransferException('备份中的歌词数据无效');
-      }
-      for (final entry in rawLyrics.entries) {
-        try {
-          final value = _stringMap(entry.value);
-          if (value['reference'] is! Map || value['offset'] is! num) {
-            throw const FormatException('结构无效');
-          }
-          final reference = _stringMap(value['reference']);
-          LyricsReference.fromMap(reference);
-          lyrics[entry.key.toString()] = {
-            'reference': reference,
-            'offset': value['offset'],
-          };
-        } catch (error) {
-          warnings.add('跳过歌词 ${entry.key}：$error');
-        }
-      }
+      final lyrics = <String, Map<String, dynamic>>{
+        for (final playlist in playlists)
+          for (final track in playlist.tracks)
+            if (track.lyricsSource.isNotEmpty)
+              track.id: {
+                'reference': {'provider': track.lyricsSource, 'id': track.lyricsId},
+                'offset': 0,
+              },
+      };
       return _BackupBundle(
         session: session,
         playlists: playlists,
@@ -530,14 +516,13 @@ class _BackupPlaylist {
     final id = json['id'];
     final name = json['name'];
     final isOnline = json['isOnline'];
-    final remoteId = json['remoteId'];
     final rawTracks = json['tracks'];
     if (id is! String ||
         id.trim().isEmpty ||
         name is! String ||
         isOnline is! bool ||
         rawTracks is! List ||
-        (isOnline && (remoteId is! String || remoteId.trim().isEmpty))) {
+        (isOnline && id == Playlist.favoritesId)) {
       throw const AppTransferException('备份中的歌单数据无效');
     }
     if (id == Playlist.favoritesId && isOnline) {
@@ -560,7 +545,7 @@ class _BackupPlaylist {
       id: id,
       name: name,
       isOnline: isOnline,
-      remoteId: remoteId as String?,
+      remoteId: isOnline ? id : null,
       tracks: tracks,
     );
   }
@@ -581,6 +566,8 @@ class _BackupTrack {
     required this.uploader,
     required this.musicSource,
     required this.musicId,
+    required this.lyricsSource,
+    required this.lyricsId,
   });
 
   factory _BackupTrack.fromJson(Map<String, dynamic> json) {
@@ -588,9 +575,13 @@ class _BackupTrack {
     final bvid = json['bvid'];
     final cid = json['cid'];
     final title = json['title'];
-    final uploader = json['uploader'];
-    final musicSource = json['musicSource'];
-    final musicId = json['musicId'];
+    final uploader = json['author'];
+    final cover = json['cover'];
+    final lyrics = json['lyrics'];
+    final musicSource = cover is List && cover.length == 2 ? cover[0] : null;
+    final musicId = cover is List && cover.length == 2 ? cover[1] : null;
+    final lyricsSource = lyrics is List && lyrics.length == 2 ? lyrics[0] : null;
+    final lyricsId = lyrics is List && lyrics.length == 2 ? lyrics[1] : null;
     if (id is! String ||
         id.isEmpty ||
         bvid is! String ||
@@ -601,11 +592,16 @@ class _BackupTrack {
         uploader is! String ||
         musicSource is! String ||
         musicId is! String ||
+        lyricsSource is! String ||
+        lyricsId is! String ||
         (musicSource.isEmpty != musicId.isEmpty) ||
-        (musicSource.isNotEmpty && !LyricProvider.values.any((p) => p.apiName == musicSource))) {
+        (lyricsSource.isEmpty != lyricsId.isEmpty) ||
+        (musicSource.isNotEmpty && !LyricProvider.values.any((p) => p.apiName == musicSource)) ||
+        (lyricsSource.isNotEmpty && !LyricProvider.values.any((p) => p.apiName == lyricsSource))) {
       throw const AppTransferException('备份中的歌曲标识无效');
     }
-    if (!RegExp('^${RegExp.escape(bvid)}_p[1-9][0-9]*\$').hasMatch(id)) {
+    final baseId = bvid.startsWith('BV1') ? bvid.substring(3) : bvid;
+    if (id != baseId && !RegExp('^${RegExp.escape(baseId)}_p[2-9][0-9]*\$').hasMatch(id)) {
       throw const AppTransferException('备份中的歌曲分 P 标识无效');
     }
     return _BackupTrack(
@@ -616,6 +612,8 @@ class _BackupTrack {
       uploader: uploader,
       musicSource: musicSource,
       musicId: musicId,
+      lyricsSource: lyricsSource,
+      lyricsId: lyricsId,
     );
   }
 
@@ -626,4 +624,6 @@ class _BackupTrack {
   final String uploader;
   final String musicSource;
   final String musicId;
+  final String lyricsSource;
+  final String lyricsId;
 }

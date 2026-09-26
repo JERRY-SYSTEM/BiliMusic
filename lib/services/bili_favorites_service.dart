@@ -102,7 +102,7 @@ class BiliFavoritesService {
       }
     }
     if (cid == 0 || bvid.isEmpty) return null;
-    return Track(id: '${bvid}_p1', bvid: bvid, cid: cid, title: title.isEmpty ? '未知曲目' : title, rawTitle: title, uploader: uploader.isEmpty ? '未知UP主' : uploader, coverUrl: '', duration: duration);
+    return Track(id: Track.idFor(bvid), bvid: bvid, cid: cid, title: title.isEmpty ? '未知曲目' : title, rawTitle: title, uploader: uploader.isEmpty ? '未知UP主' : uploader, coverUrl: '', duration: duration);
   }
 
   static Future<Map<String, dynamic>> _get(String url, String cookies) async {

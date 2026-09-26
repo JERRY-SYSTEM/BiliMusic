@@ -67,7 +67,7 @@ class DatabaseService {
     return p;
   }
   static Future<Playlist> createOnlinePlaylist({required String remoteId, required String name, String? coverUrl, required List<Track> tracks}) async {
-    final p = Playlist(id: 'online_$remoteId', name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
+    final p = Playlist(id: remoteId, name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
     await _editPlaylists((all) { all.removeWhere((p) => p.remoteId == remoteId); all.add(p); });
     return p;
   }
@@ -162,6 +162,34 @@ class DatabaseService {
     });
   }
   static Future<void> clearSearchHistory() => _write((txn) async { await txn.delete('search_history'); });
+
+  static Future<bool> hasAutoCoverMatchMiss(String trackId) async {
+    final rows = await (await AppDatabase.instance).query(
+      'auto_cover_match_misses',
+      columns: ['track_id'],
+      where: 'track_id = ?',
+      whereArgs: [trackId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  static Future<void> markAutoCoverMatchMiss(String trackId) async {
+    await (await AppDatabase.instance).insert(
+      'auto_cover_match_misses',
+      {'track_id': trackId},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  static Future<void> clearAutoCoverMatchMiss(String trackId) async {
+    await (await AppDatabase.instance).delete(
+      'auto_cover_match_misses',
+      where: 'track_id = ?',
+      whereArgs: [trackId],
+    );
+  }
+
   static Future<void> saveLyricsReference(
     String trackId,
     LyricsReference reference, {
@@ -235,6 +263,11 @@ class DatabaseService {
       musicId: reference.id,
     );
     await AppDatabase.putTrack(txn, updated, overwrite: true);
+    await txn.delete(
+      'auto_cover_match_misses',
+      where: 'track_id = ?',
+      whereArgs: [track.id],
+    );
     final old = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [track.id]);
     await txn.insert('lyrics', {
       'track_id': track.id,

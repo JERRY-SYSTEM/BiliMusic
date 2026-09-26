@@ -32,6 +32,19 @@ class CacheInventory {
     final buckets = <String, CacheBucket>{
       for (final track in tracks) track.id: CacheBucket(track: track, files: <File>[]),
     };
+    final coverOwnerByPath = <String, String>{};
+    for (final row in await AppDatabase.coverCaches()) {
+      try {
+        final track = Track.fromMap(AppDatabase.decode(row['track_payload']));
+        buckets.putIfAbsent(
+          track.id,
+          () => CacheBucket(track: track, files: <File>[]),
+        );
+        coverOwnerByPath[row['path'] as String] = track.id;
+      } catch (_) {
+        // A malformed ownership row must not make the cache page unusable.
+      }
+    }
     final otherFiles = <File>[];
     var otherBytes = 0;
     final otherLyrics = <String>[];
@@ -64,11 +77,17 @@ class CacheInventory {
     if (await coversDir.exists()) {
       for (final entity in await coversDir.list().toList()) {
         if (entity is! File) continue;
-        Track? owner;
-        for (final track in tracks) {
+        final registeredId = coverOwnerByPath[entity.path] ??
+            (entity.path.endsWith('.part')
+                ? coverOwnerByPath[entity.path.substring(0, entity.path.length - 5)]
+                : null);
+        Track? owner = buckets[registeredId]?.track;
+        // Retain hash matching for cache files created before ownership was
+        // persisted. All new files take the exact-path branch above.
+        for (final track in owner == null
+            ? buckets.values.map((bucket) => bucket.track!).toList()
+            : const <Track>[]) {
           if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
-          // Cover filenames are dimension-specific. Without a persisted
-          // ownership map, historical files remain safely in “其它”.
           for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
             final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
             if (entity.path.contains(key)) { owner = track; break; }
