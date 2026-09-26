@@ -49,6 +49,7 @@ class AppDatabase {
           await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, lines_json TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
           await db.execute('CREATE TABLE cover_cache (path TEXT PRIMARY KEY, track_id TEXT NOT NULL, fetch_url TEXT NOT NULL, track_payload TEXT NOT NULL)');
           await db.execute('CREATE INDEX cover_cache_by_track ON cover_cache(track_id)');
+          await db.execute('CREATE TABLE cover_match_failures (track_id TEXT PRIMARY KEY)');
           for (final table in ['settings', 'session', 'playback_state']) {
             await db.execute('CREATE TABLE $table (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)');
           }
@@ -58,16 +59,15 @@ class AppDatabase {
           await db.insert('playlists', {'id': 'favorites', 'position': 0, 'payload': jsonEncode({'id':'favorites', 'name':'收藏', 'isOnline':false})});
         },
         onUpgrade: (db, oldVersion, newVersion) async {
-          if (oldVersion == 4) {
-            await db.execute('CREATE TABLE IF NOT EXISTS cover_cache (path TEXT PRIMARY KEY, track_id TEXT NOT NULL, fetch_url TEXT NOT NULL, track_payload TEXT NOT NULL)');
-            await db.execute('CREATE INDEX IF NOT EXISTS cover_cache_by_track ON cover_cache(track_id)');
+          if (oldVersion == 1) {
+            await db.execute('CREATE TABLE IF NOT EXISTS cover_match_failures (track_id TEXT PRIMARY KEY)');
             return;
           }
           for (final table in [
             'playback_queue', 'downloads', 'downloaded_tracks',
             'recently_played', 'playlist_tracks', 'playlists', 'tracks',
             'search_history', 'lyrics', 'settings', 'session',
-            'playback_state', 'cover_cache',
+            'playback_state', 'cover_cache', 'cover_match_failures',
           ]) {
             await db.execute('DROP TABLE IF EXISTS $table');
           }
@@ -82,6 +82,7 @@ class AppDatabase {
           await db.execute('CREATE TABLE lyrics (track_id TEXT PRIMARY KEY, provider TEXT NOT NULL, lyric_id TEXT NOT NULL, title TEXT, artist TEXT, picture_url TEXT, lines_json TEXT, offset_ms INTEGER NOT NULL DEFAULT 0)');
           await db.execute('CREATE TABLE cover_cache (path TEXT PRIMARY KEY, track_id TEXT NOT NULL, fetch_url TEXT NOT NULL, track_payload TEXT NOT NULL)');
           await db.execute('CREATE INDEX cover_cache_by_track ON cover_cache(track_id)');
+          await db.execute('CREATE TABLE cover_match_failures (track_id TEXT PRIMARY KEY)');
           for (final table in ['settings', 'session', 'playback_state']) {
             await db.execute('CREATE TABLE $table (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)');
           }
@@ -200,6 +201,105 @@ class AppDatabase {
     _coverCacheUpdates.add(null);
   }
 
+  static Future<void> deleteCoverCachesForTrack(Track track) async {
+    final db = await instance;
+    final rows = await db.query(
+      'cover_cache',
+      columns: ['path', 'fetch_url'],
+      where: 'track_id = ?',
+      whereArgs: [track.id],
+    );
+    final paths = rows
+        .where((row) => _isCacheForCover(
+              row['fetch_url'] as String,
+              track.coverUrl,
+            ))
+        .map((row) => row['path'] as String)
+        .toList();
+    for (final path in paths) {
+      await db.delete('cover_cache', where: 'path = ?', whereArgs: [path]);
+    }
+    await _deleteCoverCaches([track], paths);
+    await _deleteManagedCoverFile(track.coverUrl);
+    _coverCacheUpdates.add(null);
+  }
+
+  static bool _isCacheForCover(String fetchUrl, String coverUrl) =>
+      fetchUrl == coverUrl || fetchUrl.startsWith('$coverUrl@');
+
+  static Future<void> deleteCoverCacheForUrl(String url) async {
+    if (url.isEmpty) return;
+    if (url.startsWith('/') ||
+        url.startsWith('file://') ||
+        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(url)) {
+      await _deleteManagedCoverFile(url);
+      return;
+    }
+    final Directory support;
+    try {
+      support = await getApplicationSupportDirectory();
+    } catch (_) {
+      return;
+    }
+    final directory = Directory('${support.path}/bilimusic_covers');
+    if (!await directory.exists()) return;
+    await _deleteCoverUrlVariants(directory, url);
+  }
+
+  static Future<void> _deleteManagedCoverFile(String value) async {
+    if (value.isEmpty) return;
+    final rawPath = value.startsWith('file://')
+        ? value.substring('file://'.length)
+        : value;
+    final Directory documents;
+    try {
+      documents = await getApplicationDocumentsDirectory();
+    } catch (_) {
+      return;
+    }
+    final managedDirectory = Directory('${documents.path}/bilimusic_covers');
+    final file = File(rawPath);
+    if (!await managedDirectory.exists() || !await file.exists()) return;
+    try {
+      final managedPath = await managedDirectory.resolveSymbolicLinks();
+      final filePath = await file.resolveSymbolicLinks();
+      final prefix = '$managedPath${Platform.pathSeparator}';
+      if (!filePath.startsWith(prefix)) return;
+      await file.delete();
+    } catch (_) {}
+  }
+
+  static Future<bool> hasCoverMatchFailed(String trackId) async {
+    final rows = await (await instance).query(
+      'cover_match_failures',
+      columns: ['track_id'],
+      where: 'track_id = ?',
+      whereArgs: [trackId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  static Future<void> markCoverMatchFailed(String trackId) async {
+    await (await instance).insert(
+      'cover_match_failures',
+      {'track_id': trackId},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  static Future<void> clearCoverMatchFailure(
+    String trackId, {
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await instance;
+    await db.delete(
+      'cover_match_failures',
+      where: 'track_id = ?',
+      whereArgs: [trackId],
+    );
+  }
+
   static Future<void> forgetDownload(String id, int? quality) async {
     final db = await instance;
     await db.transaction((txn) async {
@@ -229,6 +329,8 @@ class AppDatabase {
         coverRows.map((row) => row['path'] as String),
       );
       await db.delete('cover_cache', where: 'track_id = ?', whereArgs: [track.id]);
+      await db.delete('cover_match_failures', where: 'track_id = ?', whereArgs: [track.id]);
+      await _deleteManagedCoverFile(track.coverUrl);
     }
     await _deleteCoverCaches(orphans, registeredCoverPaths);
   }
@@ -237,7 +339,17 @@ class AppDatabase {
     List<Track> tracks,
     List<String> registeredPaths,
   ) async {
-    if (tracks.isEmpty) return;
+    if (tracks.isEmpty && registeredPaths.isEmpty) return;
+    for (final path in registeredPaths) {
+      for (final candidate in [path, '$path.part']) {
+        final file = File(candidate);
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+      }
+    }
     final Directory support;
     try {
       support = await getApplicationSupportDirectory();
@@ -246,33 +358,41 @@ class AppDatabase {
     }
     final directory = Directory('${support.path}/bilimusic_covers');
     if (!await directory.exists()) return;
-    for (final path in registeredPaths) {
-      for (final candidate in [path, '$path.part']) {
-        final file = File(candidate);
-        if (await file.exists()) {
-          try { await file.delete(); } catch (_) {}
-        }
+    for (final track in tracks) {
+      await _deleteCoverUrlVariants(directory, track.coverUrl);
+    }
+  }
+
+  static Future<void> _deleteCoverUrlVariants(
+    Directory directory,
+    String url,
+  ) async {
+    final uri = Uri.tryParse(url);
+    if (url.isEmpty || uri == null || !uri.hasScheme) return;
+    final urls = <String>{url};
+    final host = uri.host;
+    final isBili = host.contains('hdslb.com') ||
+        host.contains('biliimg.com') ||
+        host.contains('bilivideo.com') ||
+        host.contains('bilibili.com');
+    if (isBili && !url.contains('@')) {
+      for (final size in [48, 56, 64, 72, 80, 96, 128, 256, 512]) {
+        urls.add('$url@${size}w_${size}h_1e_1c.webp');
       }
     }
-    for (final track in tracks) {
-      final url = track.coverUrl;
-      final uri = Uri.tryParse(url);
-      if (url.isEmpty || uri == null || !uri.hasScheme) continue;
-      final urls = <String>{url};
-      final host = uri.host;
-      final isBili = host.contains('hdslb.com') || host.contains('biliimg.com') || host.contains('bilivideo.com') || host.contains('bilibili.com');
-      if (isBili && !url.contains('@')) {
-        for (final size in [48, 56, 64, 72, 80, 96, 128, 256, 512]) {
-          urls.add('$url@${size}w_${size}h_1e_1c.webp');
-        }
-      }
-      for (final cachedUrl in urls) {
-        final key = md5.convert(utf8.encode(cachedUrl)).toString();
-        for (final name in ['img_$key.img', 'img_$key.img.part', 'system_$key.jpg', 'system_$key.jpg.part']) {
-          final file = File('${directory.path}/$name');
-          if (await file.exists()) {
-            try { await file.delete(); } catch (_) {}
-          }
+    for (final cachedUrl in urls) {
+      final key = md5.convert(utf8.encode(cachedUrl)).toString();
+      for (final name in [
+        'img_$key.img',
+        'img_$key.img.part',
+        'system_$key.jpg',
+        'system_$key.jpg.part',
+      ]) {
+        final file = File('${directory.path}/$name');
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {}
         }
       }
     }

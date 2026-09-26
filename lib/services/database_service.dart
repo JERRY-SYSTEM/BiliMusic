@@ -76,10 +76,21 @@ class DatabaseService {
     if (i < 0 || name.trim().isEmpty) return;
     all[i] = Playlist.fromMap(all[i].toMap()..['name'] = name.trim(), tracks: all[i].tracks);
   });
-  static Future<void> setPlaylistCover(String id, String? path) => _editPlaylists((all) {
-    final i = all.indexWhere((p) => p.id == id);
-    if (i >= 0) all[i] = Playlist.fromMap(all[i].toMap()..['coverUrl'] = path, tracks: all[i].tracks);
-  });
+  static Future<void> setPlaylistCover(String id, String? path) async {
+    String? previous;
+    await _editPlaylists((all) {
+      final i = all.indexWhere((p) => p.id == id);
+      if (i < 0) return;
+      previous = all[i].coverUrl;
+      all[i] = Playlist.fromMap(
+        all[i].toMap()..['coverUrl'] = path,
+        tracks: all[i].tracks,
+      );
+    });
+    if (previous != null && previous != path) {
+      await AppDatabase.deleteCoverCacheForUrl(previous!);
+    }
+  }
   static Future<void> deletePlaylist(String id) => _editPlaylists((all) { if (id != Playlist.favoritesId) all.removeWhere((p) => p.id == id); });
   static void _move(List<Track> tracks, int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= tracks.length) return;
@@ -145,7 +156,25 @@ class DatabaseService {
       for (final table in ['downloaded_tracks', 'recently_played', 'playlist_tracks']) { await txn.delete(table, where: 'track_id = ?', whereArgs: [t.id]); }
     }, library: true, history: true);
   }
-  static Future<void> updateTrackMetadata(Track t) => _write((txn) => AppDatabase.putTrack(txn, t, overwrite: true), library: true, history: true);
+  static Future<void> updateTrackMetadata(Track t) async {
+    final previous = await _write((txn) async {
+      final rows = await txn.query(
+        'tracks',
+        columns: ['payload'],
+        where: 'id = ?',
+        whereArgs: [t.id],
+        limit: 1,
+      );
+      final old = rows.isEmpty
+          ? null
+          : Track.fromMap(AppDatabase.decode(rows.first['payload']));
+      await AppDatabase.putTrack(txn, t, overwrite: true);
+      return old;
+    }, library: true, history: true);
+    if (previous != null && previous.coverUrl != t.coverUrl) {
+      await AppDatabase.deleteCoverCachesForTrack(previous);
+    }
+  }
   static Future<List<String>> getSearchHistory() async {
     final rows = await (await AppDatabase.instance).query('search_history', orderBy: 'position');
     return rows.map((r) => r['query'] as String).toList();
@@ -217,37 +246,56 @@ class DatabaseService {
     LyricsResult result, {
     bool useReferenceCover = true,
     bool overwriteDisplayMetadata = false,
-  }
-  ) => _write((txn) async {
-    final reference = result.reference;
-    if (reference == null || result.lines.isEmpty) {
-      throw StateError('歌曲补全结果不完整');
+  }) async {
+    final saved = await _write((txn) async {
+      final reference = result.reference;
+      if (reference == null || result.lines.isEmpty) {
+        throw StateError('歌曲补全结果不完整');
+      }
+      final trackRows = await txn.query(
+        'tracks',
+        where: 'id = ?',
+        whereArgs: [track.id],
+      );
+      final persisted = trackRows.isEmpty
+          ? null
+          : Track.fromMap(AppDatabase.decode(trackRows.first['payload']));
+      final base = overwriteDisplayMetadata || persisted == null
+          ? track
+          : persisted;
+      final updated = base.copyWith(
+        coverUrl: !useReferenceCover || (reference.pictureUrl ?? '').isEmpty
+            ? base.coverUrl
+            : reference.pictureUrl,
+        musicSource: reference.provider.apiName,
+        musicId: reference.id,
+      );
+      await AppDatabase.putTrack(txn, updated, overwrite: true);
+      final old = await txn.query(
+        'lyrics',
+        where: 'track_id = ?',
+        whereArgs: [track.id],
+      );
+      await txn.delete('lyrics', where: 'track_id = ?', whereArgs: [track.id]);
+      await txn.insert('lyrics', {
+        'track_id': track.id,
+        'provider': reference.provider.apiName,
+        'lyric_id': reference.id,
+        'title': reference.title,
+        'artist': reference.artist,
+        'picture_url': reference.pictureUrl,
+        'lines_json':
+            jsonEncode(result.lines.map((line) => line.toMap()).toList()),
+        'offset_ms': old.isEmpty ? 0 : old.first['offset_ms'],
+      });
+      await AppDatabase.clearCoverMatchFailure(track.id, executor: txn);
+      return (previous: persisted ?? track, updated: updated);
+    }, library: true, history: true);
+    if (saved.previous.coverUrl != saved.updated.coverUrl) {
+      await AppDatabase.deleteCoverCachesForTrack(saved.previous);
     }
-    final trackRows = await txn.query('tracks', where: 'id = ?', whereArgs: [track.id]);
-    final base = overwriteDisplayMetadata || trackRows.isEmpty
-        ? track
-        : Track.fromMap(AppDatabase.decode(trackRows.first['payload']));
-    final updated = base.copyWith(
-      coverUrl: !useReferenceCover || (reference.pictureUrl ?? '').isEmpty
-          ? base.coverUrl
-          : reference.pictureUrl,
-      musicSource: reference.provider.apiName,
-      musicId: reference.id,
-    );
-    await AppDatabase.putTrack(txn, updated, overwrite: true);
-    final old = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [track.id]);
-    await txn.insert('lyrics', {
-      'track_id': track.id,
-      'provider': reference.provider.apiName,
-      'lyric_id': reference.id,
-      'title': reference.title,
-      'artist': reference.artist,
-      'picture_url': reference.pictureUrl,
-      'lines_json': jsonEncode(result.lines.map((line) => line.toMap()).toList()),
-      'offset_ms': old.isEmpty ? 0 : old.first['offset_ms'],
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    return updated;
-  }, library: true, history: true);
+    return saved.updated;
+  }
 
   static Future<LyricsReference?> getLyricsReference(String id) async {
     final rows = await (await AppDatabase.instance).query('lyrics', where: 'track_id = ?', whereArgs: [id]);

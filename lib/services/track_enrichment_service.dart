@@ -2,11 +2,13 @@ import 'dart:async';
 
 import '../models/lyric_line.dart';
 import '../models/track.dart';
+import 'app_database.dart';
 import 'database_service.dart';
 import 'lyrics_engine.dart';
 
 /// Resolves a Bilibili track to a music-catalog song exactly once at a time.
-/// Failures are deliberately not memoized so a later display can retry.
+/// A failed automatic cover match is persisted so reopening the same song
+/// does not repeat the provider requests.
 class TrackEnrichmentService {
   TrackEnrichmentService._();
 
@@ -16,7 +18,11 @@ class TrackEnrichmentService {
 
   static Future<Track?> enrich(Track track) {
     return _inFlight.putIfAbsent(track.id, () async {
+      final needsCover = track.coverUrl.isEmpty;
       try {
+        if (needsCover && await AppDatabase.hasCoverMatchFailed(track.id)) {
+          return track;
+        }
         if (track.musicSource.isNotEmpty &&
             track.musicId.isNotEmpty &&
             track.coverUrl.isNotEmpty &&
@@ -54,12 +60,21 @@ class TrackEnrichmentService {
         if (result == null ||
             result.reference == null ||
             result.lines.isEmpty) {
+          if (needsCover) {
+            await AppDatabase.markCoverMatchFailed(track.id);
+          }
           return null;
         }
         final updated = await DatabaseService.completeTrackEnrichment(track, result);
+        if (updated.coverUrl.isEmpty) {
+          await AppDatabase.markCoverMatchFailed(track.id);
+        }
         _updates.add(updated);
         return updated;
       } catch (_) {
+        if (needsCover) {
+          await AppDatabase.markCoverMatchFailed(track.id);
+        }
         return null;
       } finally {
         _inFlight.remove(track.id);

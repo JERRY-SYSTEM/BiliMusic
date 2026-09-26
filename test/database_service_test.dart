@@ -143,6 +143,63 @@ void main() {
     expect((await DatabaseService.getCachedLyrics(saved.id))!.lines.single.text, '歌词');
   });
 
+  test('replacing artwork removes its old cache ownership', () async {
+    final original = track('cover-replaced').copyWith(
+      coverUrl: 'https://example.com/old.jpg',
+    );
+    await DatabaseService.addTrackToPlaylist(Playlist.favoritesId, original);
+    await AppDatabase.registerCoverCache(
+      original,
+      original.coverUrl,
+      '${directory.path}/old-cover.img',
+    );
+
+    await DatabaseService.updateTrackMetadata(
+      original.copyWith(coverUrl: '${directory.path}/picked.jpg'),
+    );
+
+    expect(await AppDatabase.coverCaches(), isEmpty);
+  });
+
+  test('replacing lyrics discards old cached lines', () async {
+    final original = track('lyrics-replaced');
+    await DatabaseService.addTrackToPlaylist(Playlist.favoritesId, original);
+    LyricsResult result(String id, String text) => LyricsResult(
+          source: 'netease',
+          songTitle: '歌名',
+          artistName: '歌手',
+          lines: [LyricLine(time: 0, text: text)],
+          reference: LyricsReference(
+            provider: LyricProvider.netease,
+            id: id,
+          ),
+        );
+
+    await DatabaseService.completeTrackEnrichment(
+      original,
+      result('old', '旧歌词'),
+      useReferenceCover: false,
+    );
+    await DatabaseService.completeTrackEnrichment(
+      original,
+      result('new', '新歌词'),
+      useReferenceCover: false,
+    );
+
+    final cached = await DatabaseService.getCachedLyrics(original.id);
+    expect(cached!.reference!.id, 'new');
+    expect(cached.lines.map((line) => line.text), ['新歌词']);
+  });
+
+  test('failed cover matches persist across database reopen', () async {
+    await AppDatabase.markCoverMatchFailed('no-cover');
+    await AppDatabase.close();
+
+    expect(await AppDatabase.hasCoverMatchFailed('no-cover'), isTrue);
+    await AppDatabase.clearCoverMatchFailure('no-cover');
+    expect(await AppDatabase.hasCoverMatchFailed('no-cover'), isFalse);
+  });
+
   test('settings, session, shuffle and duplicate queue entries survive restart', () async {
     final settings = AppSettingsService.forTesting();
     final auth = BiliAuthController.forTesting();
