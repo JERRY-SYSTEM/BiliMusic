@@ -670,7 +670,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                   children: [
                     IconButton(
                       key: const Key('lyricSearchButton'),
-                      tooltip: '手动匹配歌词',
+                      tooltip: '手动搜索歌词',
                       color: context.palette.accent,
                       onPressed: _openLyricSearch,
                       icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
@@ -681,7 +681,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                         borderRadius: BorderRadius.circular(AppRadius.pill),
                         border: Border.all(color: context.palette.accent30),
                       ),
-                      padding: const EdgeInsets.only(bottom: 3),
+                      padding: const EdgeInsets.all(5),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -691,7 +691,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                             color: context.palette.accent,
                             onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
                             padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft, size: 19),
                           ),
                           SizedBox(
@@ -714,7 +713,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                                 ? () => _adjustLyricsOffset(-offset)
                                 : null,
                             padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedTimerReset, size: 19),
                           ),
                           IconButton(
@@ -723,7 +721,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                             color: context.palette.accent,
                             onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
                             padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
                             icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight, size: 19),
                           ),
                         ],
