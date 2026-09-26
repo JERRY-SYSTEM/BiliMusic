@@ -273,12 +273,10 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                     uploader: newArtist,
                     coverUrl: newCoverUrl,
                   );
-                  if (mounted) setState(() => _displayTrack = updated);
                   await DatabaseService.updateTrackMetadata(updated);
                   if (!mounted) return;
+                  setState(() => _displayTrack = updated);
                   widget.handler.updateCurrentTrackMetadata(updated);
-                  if (!sheetContext.mounted) return;
-                  Navigator.of(sheetContext).pop();
                 },
               ),
             ),

@@ -1,4 +1,6 @@
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,6 +13,7 @@ import 'package:bilimusic/widgets/marquee_text.dart';
 import 'package:bilimusic/widgets/expand_from_card.dart';
 import 'package:bilimusic/widgets/playlist_detail_sheet.dart';
 import 'package:bilimusic/widgets/cached_cover_image.dart';
+import 'package:bilimusic/widgets/lyric_editor_dialog.dart';
 
 const _style = TextStyle(fontSize: 14, height: 1.25);
 
@@ -451,5 +454,65 @@ void main() {
     final gradient = decoration.gradient as LinearGradient;
     final palette = theme.extension<AppPalette>()!;
     expect(gradient.colors.last, palette.surfaceDeep);
+  });
+
+  testWidgets('local cover renders without a loading spinner', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: CachedCoverImage(
+          url: '/missing-but-local-cover.jpg',
+          width: 80,
+          height: 80,
+        ),
+      ),
+    ));
+
+    expect(find.byKey(const Key('coverLoadingPlaceholder')), findsNothing);
+  });
+
+  test('cover path detection supports file URIs and Windows paths', () {
+    expect(CachedCoverImage.isLocalPath('file:///tmp/cover.jpg'), isTrue);
+    expect(CachedCoverImage.isLocalPath(r'C:\covers\cover.jpg'), isTrue);
+    expect(CachedCoverImage.isLocalPath('https://example.com/cover.jpg'), isFalse);
+  });
+
+  testWidgets('metadata editor closes after the async save completes',
+      (tester) async {
+    final save = Completer<void>();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.build(ThemeMode.dark, AppColors.accent),
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              builder: (_) => SizedBox(
+                height: 520,
+                child: LyricEditorDialog(
+                  songTitle: '旧标题',
+                  rawTitle: '旧标题',
+                  artistName: '歌手',
+                  onUpdateMetadata: (_, __, ___) => save.future,
+                ),
+              ),
+            ),
+            child: const Text('打开'),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '新标题');
+    await tester.tap(find.byKey(const Key('metadataSaveButton')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('metadataSavingIndicator')), findsOneWidget);
+    expect(find.byType(LyricEditorDialog), findsOneWidget);
+
+    save.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(LyricEditorDialog), findsNothing);
   });
 }

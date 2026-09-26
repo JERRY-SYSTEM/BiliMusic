@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -55,10 +56,18 @@ class CachedCoverImage extends StatefulWidget {
   }
 
   static bool isLocalPath(String url) =>
-      url.startsWith('/') || url.startsWith('file://');
+      url.startsWith('/') ||
+      url.startsWith('file://') ||
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(url);
 
-  static String localPathOf(String url) =>
-      url.startsWith('file://') ? url.substring('file://'.length) : url;
+  static String localPathOf(String url) {
+    if (!url.startsWith('file://')) return url;
+    try {
+      return Uri.parse(url).toFilePath(windows: Platform.isWindows);
+    } catch (_) {
+      return url.substring('file://'.length);
+    }
+  }
 
   @override
   State<CachedCoverImage> createState() => _CachedCoverImageState();
@@ -100,6 +109,14 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   void initState() {
     super.initState();
     _loadKey = widget.url;
+    if (CachedCoverImage.isLocalPath(widget.url)) {
+      // The picker has already handed us a local file. Render it immediately
+      // through FileImage instead of showing a network-style loading spinner
+      // while an asynchronous existence check runs.
+      _file = File(CachedCoverImage.localPathOf(widget.url));
+      _status = _CoverStatus.ready;
+      _loadStarted = true;
+    }
   }
 
   @override
@@ -137,12 +154,16 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
         oldWidget.track?.id != widget.track?.id;
     if (sourceChanged) {
       _loadKey = widget.url;
-      _loadStarted = false;
+      final local = CachedCoverImage.isLocalPath(widget.url);
+      _loadStarted = local;
       setState(() {
-        _file = null;
+        _file = local
+            ? File(CachedCoverImage.localPathOf(widget.url))
+            : null;
         _httpStatus = null;
-        _status = _CoverStatus.deferred;
+        _status = local ? _CoverStatus.ready : _CoverStatus.deferred;
       });
+      if (local) return;
       if (_shouldDeferNetEaseWork) {
         _scheduleVisibilityCheck();
       } else {
@@ -273,6 +294,21 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       final md5Key = md5.convert(utf8.encode(fetchUrl)).toString();
       final file = File('${cacheDir.path}/img_$md5Key.img');
 
+      // A cache hit should paint immediately. In particular, selecting a
+      // search result must not keep showing a spinner while an unrelated
+      // ownership row waits for SQLite.
+      if (await file.exists() && await file.length() > 0) {
+        _settle(token, _CoverLoadResult(file: file));
+        if (cacheOwner != null) {
+          unawaited(AppDatabase.registerCoverCache(
+            cacheOwner,
+            fetchUrl,
+            file.path,
+          ));
+        }
+        return;
+      }
+
       // Persist ownership before touching the network. Cache management can
       // now show the song while its visible cover is still downloading, and
       // exact paths avoid misclassifying uncommon thumbnail sizes as “其它”.
@@ -282,11 +318,6 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           fetchUrl,
           file.path,
         );
-      }
-
-      if (await file.exists() && await file.length() > 0) {
-        _settle(token, _CoverLoadResult(file: file));
-        return;
       }
 
       final _CoverLoadResult cached;

@@ -15,7 +15,11 @@ class LyricEditorDialog extends StatefulWidget {
   final String rawTitle;
   final String artistName;
   final String? coverUrl;
-  final Function(String title, String artist, String coverUrl)? onUpdateMetadata;
+  final Future<void> Function(
+    String title,
+    String artist,
+    String coverUrl,
+  )? onUpdateMetadata;
 
   const LyricEditorDialog({
     super.key,
@@ -42,6 +46,8 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   /// True while a 智能识别 validation lookup is in flight. The button shows a
   /// spinner instead of guessing into the fields.
   bool _parsing = false;
+  bool _saving = false;
+  String? _saveError;
 
   @override
   void initState() {
@@ -91,7 +97,8 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   // Metadata
   // ---------------------------------------------------------------------------
 
-  void _saveAll() {
+  Future<void> _saveAll() async {
+    if (_saving) return;
     final newTitle = _titleController.text.trim();
     final newArtist = _artistController.text.trim();
     final newCover = _coverUrlController.text.trim();
@@ -101,16 +108,28 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
          newArtist != widget.artistName ||
          newCover != (widget.coverUrl ?? ''));
 
-    if (hasMetadataEdit && widget.onUpdateMetadata != null) {
-      widget.onUpdateMetadata!(
+    if (!hasMetadataEdit || widget.onUpdateMetadata == null) {
+      _close();
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    try {
+      await widget.onUpdateMetadata!(
         newTitle,
         newArtist.isNotEmpty ? newArtist : '未知UP主',
         newCover,
       );
-    }
-
-    if (!hasMetadataEdit || widget.onUpdateMetadata == null) {
-      _close();
+      if (mounted) _close();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _saveError = '保存失败：$error';
+      });
     }
   }
   // ---------------------------------------------------------------------------
@@ -133,6 +152,15 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
             child: _buildInfoTab(),
           ),
           const SizedBox(height: 12),
+          if (_saveError != null) ...[
+            Text(
+              _saveError!,
+              key: const Key('metadataSaveError'),
+              style: TextStyle(color: context.palette.danger),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+          ],
           // Stationary actions fixed at the bottom of the dialog.
           Row(
             children: [
@@ -140,17 +168,27 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                 child: SizedBox(
                   height: 44,
                   child: ElevatedButton(
-                    onPressed: _saveAll,
+                    key: const Key('metadataSaveButton'),
+                    onPressed: _saving ? null : _saveAll,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: context.palette.accent,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: Text('确认',
-                        style: TextStyle(
-                            color: context.palette.textPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15)),
+                    child: _saving
+                        ? SizedBox.square(
+                            key: const Key('metadataSavingIndicator'),
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: context.palette.textPrimary,
+                            ),
+                          )
+                        : Text('确认',
+                            style: TextStyle(
+                                color: context.palette.textPrimary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
                   ),
                 ),
               ),
@@ -159,7 +197,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                 child: SizedBox(
                   height: 44,
                   child: TextButton(
-                    onPressed: _close,
+                    onPressed: _saving ? null : _close,
                     style: TextButton.styleFrom(
                       foregroundColor: context.palette.textPrimary,
                       backgroundColor: Colors.transparent,
