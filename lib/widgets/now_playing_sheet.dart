@@ -675,40 +675,59 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                       onPressed: _openLyricSearch,
                       icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
                     ),
-                    IconButton(
-                      key: const Key('lyricOffsetBackwardButton'),
-                      tooltip: '显示前 0.5 秒歌词',
-                      color: context.palette.accent,
-                      onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
-                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft),
-                    ),
-                    SizedBox(
-                      width: 44,
-                      child: Text(
-                        _formatLyricsOffset(offset),
-                        key: const Key('lyricOffsetValue'),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: context.palette.textSecondary,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: context.palette.accent14,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(color: context.palette.accent30),
                       ),
-                    ),
-                    IconButton(
-                      key: const Key('lyricOffsetResetButton'),
-                      tooltip: '重置歌词偏移',
-                      color: context.palette.accent,
-                      onPressed: _isActive && hasReference && offset != 0
-                          ? () => _adjustLyricsOffset(-offset)
-                          : null,
-                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedTimerReset),
-                    ),
-                    IconButton(
-                      key: const Key('lyricOffsetForwardButton'),
-                      tooltip: '显示后 0.5 秒歌词',
-                      color: context.palette.accent,
-                      onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
-                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight),
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            key: const Key('lyricOffsetBackwardButton'),
+                            tooltip: '显示前 0.5 秒歌词',
+                            color: context.palette.accent,
+                            onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(-0.5) : null,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                            icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsLeft, size: 19),
+                          ),
+                          SizedBox(
+                            width: 40,
+                            child: Text(
+                              _formatLyricsOffset(offset),
+                              key: const Key('lyricOffsetValue'),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: context.palette.textSecondary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            key: const Key('lyricOffsetResetButton'),
+                            tooltip: '重置歌词偏移',
+                            color: context.palette.accent,
+                            onPressed: _isActive && hasReference && offset != 0
+                                ? () => _adjustLyricsOffset(-offset)
+                                : null,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                            icon: const HugeIcon(icon: HugeIcons.strokeRoundedTimerReset, size: 19),
+                          ),
+                          IconButton(
+                            key: const Key('lyricOffsetForwardButton'),
+                            tooltip: '显示后 0.5 秒歌词',
+                            color: context.palette.accent,
+                            onPressed: _isActive && hasReference ? () => _adjustLyricsOffset(0.5) : null,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                            icon: const HugeIcon(icon: HugeIcons.strokeRoundedChevronsRight, size: 19),
+                          ),
+                        ],
+                      ),
                     ),
                     const Spacer(),
                     if (hasTranslation)
