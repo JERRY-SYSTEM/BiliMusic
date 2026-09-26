@@ -391,6 +391,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       await showLyricSearchSheet(
         context: context,
         initialKeyword: track.title.trim(),
+        track: track,
         onApply: (result, selection) async {
           final reference = result.reference;
           if (reference == null) return;
@@ -798,6 +799,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 borderRadius: BorderRadius.circular(AppRadius.xl),
                 child: CachedCoverImage(
                   url: _displayTrack.coverUrl,
+                  track: _displayTrack,
                   width: size,
                   height: size,
                 ),

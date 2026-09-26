@@ -67,7 +67,7 @@ class DatabaseService {
     return p;
   }
   static Future<Playlist> createOnlinePlaylist({required String remoteId, required String name, String? coverUrl, required List<Track> tracks}) async {
-    final p = Playlist(id: 'online_$remoteId', name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
+    final p = Playlist(id: remoteId, name: name, coverUrl: coverUrl, remoteId: remoteId, isOnline: true, lastSyncedAt: DateTime.now(), tracks: tracks);
     await _editPlaylists((all) { all.removeWhere((p) => p.remoteId == remoteId); all.add(p); });
     return p;
   }

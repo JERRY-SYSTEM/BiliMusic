@@ -602,6 +602,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   borderRadius: BorderRadius.circular(10),
                   child: CachedCoverImage(
                     url: track.coverUrl,
+                    track: track,
                     width: 54,
                     height: 54,
                   ),
