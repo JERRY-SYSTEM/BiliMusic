@@ -94,14 +94,18 @@ class AppTransferService {
   Future<String> buildExportJson() async {
     await _auth.initialize();
     final playlists = await DatabaseService.getPlaylists();
-    final lyricReferences = <String, List<String>>{};
+    final lyricReferences = <String, List<Object>>{};
     for (final track in playlists.expand((playlist) => playlist.tracks)) {
       if (lyricReferences.containsKey(track.id)) continue;
       final selection = await DatabaseService.getLyricsSelection(track.id);
       final raw = selection?['reference'];
       if (raw is Map) {
         final reference = Map<String, dynamic>.from(raw);
-        lyricReferences[track.id] = [reference['provider'] as String, reference['id'] as String];
+        lyricReferences[track.id] = [
+          reference['provider'] as String,
+          reference['id'] as String,
+          (selection?['offset'] as num?)?.toDouble() ?? 0.0,
+        ];
       }
     }
     final session = _auth.session;
@@ -376,7 +380,7 @@ class AppTransferService {
     }
   }
 
-  Map<String, dynamic> _playlistToJson(Playlist playlist, Map<String, List<String>> lyrics) => {
+  Map<String, dynamic> _playlistToJson(Playlist playlist, Map<String, List<Object>> lyrics) => {
         'id': playlist.isOnline ? (playlist.remoteId ?? _stripOnlinePrefix(playlist.id)) : playlist.id,
         'name': playlist.name,
         'isOnline': playlist.isOnline,
@@ -389,7 +393,7 @@ class AppTransferService {
                 'title': track.title,
                 'author': track.uploader,
                 'cover': [track.musicSource, track.musicId],
-                'lyrics': lyrics[track.id] ?? const ['', ''],
+                'lyrics': lyrics[track.id] ?? const <Object>['', '', 0],
               },
             )
             .toList(),
@@ -465,7 +469,7 @@ class AppTransferService {
             if (track.lyricsSource.isNotEmpty)
               track.id: {
                 'reference': {'provider': track.lyricsSource, 'id': track.lyricsId},
-                'offset': 0,
+                'offset': track.lyricsOffset,
               },
       };
       return _BackupBundle(
@@ -568,6 +572,7 @@ class _BackupTrack {
     required this.musicId,
     required this.lyricsSource,
     required this.lyricsId,
+    required this.lyricsOffset,
   });
 
   factory _BackupTrack.fromJson(Map<String, dynamic> json) {
@@ -580,8 +585,9 @@ class _BackupTrack {
     final lyrics = json['lyrics'];
     final musicSource = cover is List && cover.length == 2 ? cover[0] : null;
     final musicId = cover is List && cover.length == 2 ? cover[1] : null;
-    final lyricsSource = lyrics is List && lyrics.length == 2 ? lyrics[0] : null;
-    final lyricsId = lyrics is List && lyrics.length == 2 ? lyrics[1] : null;
+    final lyricsSource = lyrics is List && lyrics.length == 3 ? lyrics[0] : null;
+    final lyricsId = lyrics is List && lyrics.length == 3 ? lyrics[1] : null;
+    final lyricsOffset = lyrics is List && lyrics.length == 3 ? lyrics[2] : null;
     if (id is! String ||
         id.isEmpty ||
         bvid is! String ||
@@ -594,6 +600,8 @@ class _BackupTrack {
         musicId is! String ||
         lyricsSource is! String ||
         lyricsId is! String ||
+        lyricsOffset is! num ||
+        !lyricsOffset.toDouble().isFinite ||
         (musicSource.isEmpty != musicId.isEmpty) ||
         (lyricsSource.isEmpty != lyricsId.isEmpty) ||
         (musicSource.isNotEmpty && !LyricProvider.values.any((p) => p.apiName == musicSource)) ||
@@ -614,6 +622,7 @@ class _BackupTrack {
       musicId: musicId,
       lyricsSource: lyricsSource,
       lyricsId: lyricsId,
+      lyricsOffset: lyricsOffset.toDouble(),
     );
   }
 
@@ -626,4 +635,5 @@ class _BackupTrack {
   final String musicId;
   final String lyricsSource;
   final String lyricsId;
+  final double lyricsOffset;
 }
