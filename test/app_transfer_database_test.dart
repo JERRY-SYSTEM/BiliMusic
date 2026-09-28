@@ -17,18 +17,17 @@ void main() {
     await AppDatabase.configure(factory: databaseFactoryFfiNoIsolate, path: inMemoryDatabasePath);
     auth = BiliAuthController.forTesting();
     service = AppTransferService(auth: auth,
-      fetchVideoInfo: (bvid) async => [Track(id: '${bvid}_p1', bvid: bvid, cid: 11, title: 'network', rawTitle: 'network', uploader: 'network', coverUrl: '', duration: 12)],
+      fetchVideoInfo: (bvid) async => [Track(id: bvid, bvid: bvid, cid: 11, title: 'network', rawTitle: 'network', uploader: 'network', coverUrl: '', duration: 12)],
       fetchOnlineTracks: (_, __) async => throw const SocketException('offline'),
     );
     // Current strict backup shape.
     backup = Uint8List.fromList(utf8.encode(jsonEncode({
-      'schemaVersion': 3, 'exportedAt': '2026-09-06T08:00:00.000Z',
+      'schemaVersion': 2, 'exportedAt': '2026-09-28T08:00:00.000Z',
       'session': {'sessData':'test', 'biliJct':'csrf', 'dedeUserId':'1', 'refreshToken':'', 'cookie':'SESSDATA=test'},
       'playlists': [
-        {'id':'favorites', 'name':'收藏', 'isOnline':false, 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手', 'musicSource':'netease', 'musicId':'123'}]},
-        {'id':'online_42', 'name':'在线', 'isOnline':true, 'remoteId':'42', 'tracks':[{'id':'BVtest_p1', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'uploader':'我的歌手', 'musicSource':'netease', 'musicId':'123'}]},
+        {'id':'favorites', 'name':'收藏', 'isOnline':false, 'tracks':[{'id':'BVtest', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'author':'我的歌手', 'cover':['netease','123'], 'lyrics':['netease','123',0.5]}]},
+        {'id':'42', 'name':'在线', 'isOnline':true, 'tracks':[{'id':'BVtest', 'bvid':'BVtest', 'cid':11, 'title':'我的歌名', 'author':'我的歌手', 'cover':['netease','123'], 'lyrics':['netease','123',0.5]}]},
       ],
-      'lyrics': {'BVtest_p1':{'reference': {'provider':'netease', 'id':'123'}, 'offset': 0}},
     })));
   });
   tearDown(() async { auth.dispose(); await AppDatabase.close(); });
@@ -45,20 +44,21 @@ void main() {
     final favorites = await DatabaseService.getFavoritesPlaylist();
     expect(favorites.tracks, hasLength(1));
     expect(favorites.tracks.single.title, '我的歌名');
-    expect(await DatabaseService.getLyricsSelection('BVtest_p1'), isNotNull);
+    final lyricSelection = await DatabaseService.getLyricsSelection('BVtest');
+    expect(lyricSelection, isNotNull);
+    expect(lyricSelection!['offset'], 0.5);
     final exported = await service.buildExportJson();
     final exportedMap = jsonDecode(exported) as Map;
     expect(exportedMap['schemaVersion'], 3);
-    final lyricReference = ((exportedMap['lyrics'] as Map)['BVtest_p1'] as Map)['reference'] as Map;
-    expect(lyricReference.keys, containsAllInOrder(['provider', 'id']));
-    expect(lyricReference, isNot(contains('title')));
-    await DatabaseService.removeTrackFromPlaylist('favorites', 'BVtest_p1');
+    final exportedTrack = (((exportedMap['playlists'] as List).first as Map)['tracks'] as List).first as Map;
+    expect(exportedTrack['lyrics'], ['netease', '123', 0.5]);
+    await DatabaseService.removeTrackFromPlaylist('favorites', 'BVtest');
     await service.importBytes(bytes: Uint8List.fromList(utf8.encode(exported)), selection: selection);
     expect((await DatabaseService.getFavoritesPlaylist()).tracks.single.uploader, '我的歌手');
   });
 
   test('online sync failure falls back to backup and commits selected session', () async {
-    final result = await service.importBytes(bytes: backup, selection: const AppImportSelection(importSession: true, importFavorites: false, playlistIds: {'online_42'}));
+    final result = await service.importBytes(bytes: backup, selection: const AppImportSelection(importSession: true, importFavorites: false, playlistIds: {'42'}));
     expect(result.failedOnlinePlaylistCount, 1);
     expect(result.trackCount, 1);
     expect((await DatabaseService.getFavoritesPlaylist()).tracks, isEmpty);
@@ -76,6 +76,6 @@ void main() {
     await expectLater(service.importBytes(bytes: backup, selection: const AppImportSelection(importSession: true, importFavorites: true, playlistIds: {})), throwsA(isA<DatabaseException>()));
     expect(auth.session, isNull);
     expect((await DatabaseService.getFavoritesPlaylist()).tracks, isEmpty);
-    expect(await DatabaseService.getLyricsSelection('BVtest_p1'), isNull);
+    expect(await DatabaseService.getLyricsSelection('BVtest'), isNull);
   });
 }

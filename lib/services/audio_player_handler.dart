@@ -1180,7 +1180,9 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   void _updateSystemLyric(Duration position) {
     final track = currentTrack;
     if (track == null) return;
-    final seconds = position.inMilliseconds / 1000 - _systemLyricsOffset;
+    // Keep the system surfaces on the same timeline as SyncedLyricsView:
+    // a positive offset advances the lyrics relative to playback.
+    final seconds = position.inMilliseconds / 1000 + _systemLyricsOffset;
     var index = -1;
     for (var i = 0; i < _systemLyrics.length; i++) {
       if (_systemLyrics[i].time <= seconds) {
@@ -1203,6 +1205,21 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     Track track, {
     bool preservePosition = false,
   }) {
+    final shouldPreservePosition =
+        preservePosition && currentTrack?.id == track.id;
+    // Take one snapshot for the whole metadata update. Publishing it first
+    // refreshes audio_service's time anchor before it rebuilds
+    // MPNowPlayingInfo; publishing the identical snapshot afterwards protects
+    // against iOS resetting elapsedPlaybackTime while applying the metadata.
+    final position = shouldPreservePosition ? _player.position : null;
+    final bufferedPosition =
+        shouldPreservePosition ? _player.bufferedPosition : null;
+    if (position != null && bufferedPosition != null) {
+      _broadcastState(
+        positionOverride: position,
+        bufferedPositionOverride: bufferedPosition,
+      );
+    }
     mediaItem.add(MediaItem(
       id: track.id,
       album: 'BiliMusic',
@@ -1211,15 +1228,12 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),
       artUri: _systemArtworkUri(track.coverUrl),
     ));
-    // Updating MPNowPlayingInfo's title/artist makes iOS temporarily reset
-    // elapsedPlaybackTime to zero unless a position-bearing playback state is
-    // published immediately afterwards. Do this only for in-track metadata
-    // changes (lyrics/artwork); a real track change is deliberately reset to
-    // zero by [_announce].
-    if (preservePosition && currentTrack?.id == track.id) {
+    // Do this only for in-track metadata changes (lyrics/artwork); a real
+    // track change is deliberately reset to zero by [_announce].
+    if (position != null && bufferedPosition != null) {
       _broadcastState(
-        positionOverride: _player.position,
-        bufferedPositionOverride: _player.bufferedPosition,
+        positionOverride: position,
+        bufferedPositionOverride: bufferedPosition,
       );
     }
   }

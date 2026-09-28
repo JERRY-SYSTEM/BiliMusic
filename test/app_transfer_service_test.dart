@@ -27,13 +27,13 @@ Map<String, dynamic> _validBackup() => {
           'isOnline': false,
           'tracks': [
             {
-              'id': 'BV1test_p1',
+              'id': 'test',
               'bvid': 'BV1test',
               'cid': 11,
               'title': '自定义歌名',
-              'uploader': '自定义歌手',
-              'musicSource': 'netease',
-              'musicId': '123',
+              'author': '自定义歌手',
+              'cover': ['netease', '123'],
+              'lyrics': ['netease', '123', 0.5],
             },
           ],
         },
@@ -45,12 +45,6 @@ Map<String, dynamic> _validBackup() => {
           'tracks': [],
         },
       ],
-      'lyrics': {
-        'BV1test_p1': {
-          'reference': {'provider': 'netease', 'id': '123'},
-          'offset': 0.5,
-        },
-      },
     };
 
 void main() {
@@ -110,11 +104,22 @@ void main() {
 
   test('skips invalid lyric references in a backup', () {
     final backup = _validBackup();
-    final lyrics = backup['lyrics'] as Map<String, dynamic>;
-    final entry = lyrics['BV1test_p1'] as Map<String, dynamic>;
-    entry['reference'] = {'provider': 'netease'};
+    final playlists = backup['playlists'] as List;
+    final track = (playlists.first['tracks'] as List).first as Map;
+    track['lyrics'] = ['netease', '', 0.5];
 
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
+  });
+
+  test('requires a numeric lyric offset in the third array item', () {
+    final backup = _validBackup();
+    final playlists = backup['playlists'] as List;
+    final track = (playlists.first['tracks'] as List).first as Map;
+    track['lyrics'] = ['netease', '123'];
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
+
+    track['lyrics'] = ['netease', '123', '0.5'];
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
   });
 
   testWidgets('设置页在缓存管理上方显示数据导入导出入口', (tester) async {

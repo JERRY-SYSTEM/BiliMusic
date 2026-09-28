@@ -182,6 +182,55 @@ void main() {
         const Duration(seconds: 4));
   });
 
+  test('system lyrics use the same positive offset direction as the app', () async {
+    await handler.playTrack(first, newQueue: [first])
+        .timeout(const Duration(seconds: 1));
+    player.position = const Duration(milliseconds: 2500);
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '第一句'),
+      LyricLine(time: 3, text: '第二句'),
+    ], offsetSeconds: 0.5);
+
+    expect(handler.mediaItem.value?.title, '第二句');
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '第一句'),
+      LyricLine(time: 3, text: '第二句'),
+    ], offsetSeconds: -0.5);
+
+    expect(handler.mediaItem.value?.title, '第一句');
+  });
+
+  test('in-track metadata updates are sandwiched by one position snapshot',
+      () async {
+    await handler.playTrack(first, newQueue: [first])
+        .timeout(const Duration(seconds: 1));
+    player.position = const Duration(milliseconds: 4250);
+    final events = <String>[];
+    final stateSubscription = handler.playbackState.listen(
+      (state) => events.add('state:${state.updatePosition.inMilliseconds}'),
+    );
+    final mediaSubscription = handler.mediaItem.listen(
+      (item) => events.add('media:${item?.title}'),
+    );
+    await flushEvents();
+    events.clear();
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '当前歌词'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+
+    expect(events, [
+      'state:4250',
+      'media:当前歌词',
+      'state:4250',
+    ]);
+    await stateSubscription.cancel();
+    await mediaSubscription.cancel();
+  });
+
   test('lyric metadata without translation uses the song title', () async {
     await handler.playTrack(first, newQueue: [first])
         .timeout(const Duration(seconds: 1));
