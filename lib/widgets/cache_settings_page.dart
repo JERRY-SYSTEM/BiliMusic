@@ -121,7 +121,21 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       onChanged: _busy ? null : (value) => setState(() => value == true ? _selected.add(key) : _selected.remove(key)),
       secondary: track == null ? HugeIcon(icon: HugeIcons.strokeRoundedFolderUnknown, color: context.palette.accent) : (track.coverUrl.isEmpty ? HugeIcon(icon: HugeIcons.strokeRoundedHeadphones, color: context.palette.accent) : ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: CachedCoverImage(url: track.coverUrl, width: 48, height: 48))),
       title: Text(track?.title ?? '其它', maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(track == null ? '无法关联到具体歌曲的缓存' : '${track.uploader} · ${_formatBytes(bucket.bytes)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: track == null
+          ? const Text('无法关联到具体歌曲的缓存', maxLines: 1, overflow: TextOverflow.ellipsis)
+          : Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    track.uploader,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(_formatBytes(bucket.bytes)),
+              ],
+            ),
       controlAffinity: ListTileControlAffinity.trailing,
     );
   }
