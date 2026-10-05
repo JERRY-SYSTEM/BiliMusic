@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'models/bili_favorite_collection.dart';
 import 'services/lyrics_engine.dart';
 import 'services/database_service.dart';
 import 'services/app_database.dart';
+import 'services/diagnostic_log.dart';
 import 'services/audio_player_handler.dart';
 import 'services/audio_download_service.dart';
 import 'services/app_settings_service.dart';
@@ -87,6 +89,20 @@ BiliMusicAudioHandler get audioHandlerInstance {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(DiagnosticLog.initialize());
+  final previousFlutterError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    DiagnosticLog.event('flutter.error', {
+      'error': DiagnosticLog.redact('${details.exception}'),
+      'stack': '${details.stack}',
+    });
+    previousFlutterError?.call(details);
+  };
+  final previousPlatformError = PlatformDispatcher.instance.onError;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    DiagnosticLog.event('dart.unhandled_error', {'error': '$error', 'stack': '$stack'});
+    return previousPlatformError?.call(error, stack) ?? false;
+  };
   await AppSettingsService.instance.initialize();
   PaintingBinding.instance.imageCache.maximumSizeBytes = 50 * 1024 * 1024;
   PaintingBinding.instance.imageCache.maximumSize = 60;
@@ -242,6 +258,13 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    DiagnosticLog.event('app.lifecycle', {
+      'state': state.name,
+      'playing': _audioHandler.isPlaying,
+      'positionMs': _audioHandler.position.inMilliseconds,
+      'imageCacheBytes': PaintingBinding.instance.imageCache.currentSizeBytes,
+      'liveImages': PaintingBinding.instance.imageCache.liveImageCount,
+    });
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       unawaited(_audioHandler.persistPlaybackState().catchError((Object e) {
@@ -364,11 +387,13 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         // subscription in dispose() stops *new* events, but an event already
         // being handled resumes after its await regardless — and writing to a
         // disposed ValueNotifier throws.
-        final selection = await DatabaseService.getLyricsSelection(track.id);
+        final selection = await DiagnosticLog.trace('lyrics.selection',
+          () => DatabaseService.getLyricsSelection(track.id));
         if (!mounted || _currentTrack.value?.id != track.id) return;
         _hasLyricsReferenceNotifier.value = selection != null;
         _lyricsOffsetNotifier.value = ((selection?['offset'] as num?) ?? 0).toDouble();
-        var selected = await DatabaseService.getCachedLyrics(track.id);
+        var selected = await DiagnosticLog.trace('lyrics.cache',
+          () => DatabaseService.getCachedLyrics(track.id));
         LyricsReference? reference;
         if (selection?['reference'] is Map) {
           reference = LyricsReference.fromMap(
@@ -386,9 +411,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           );
         }
         if (selected == null && reference != null) {
-          selected = await LyricsEngine.fetchReferenceLyrics(
-            reference,
-          );
+          final selectedReference = reference;
+          selected = await DiagnosticLog.trace('lyrics.fetch',
+            () => LyricsEngine.fetchReferenceLyrics(selectedReference));
           if (selected?.reference != null && selected!.lines.isNotEmpty) {
             await DatabaseService.saveLyricsReference(
               track.id,

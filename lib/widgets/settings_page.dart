@@ -4,6 +4,7 @@ import '../services/app_settings_service.dart';
 import '../theme/app_theme.dart';
 import 'app_transfer_page.dart';
 import 'cache_settings_page.dart';
+import 'diagnostics_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -29,6 +30,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _entry(context, icon: HugeIcons.strokeRoundedAudioWave01, title: '默认音质', subtitle: _qualityLabel(settings.defaultAudioQuality), onTap: () => _showQuality(context)),
         _entry(context, icon: HugeIcons.strokeRoundedDatabaseSync01, title: '数据导入导出', subtitle: '备份登录信息、收藏与歌单', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AppTransferPage()))),
         _entry(context, icon: HugeIcons.strokeRoundedPieChart03, title: '缓存管理', subtitle: '按歌曲管理音频、封面、歌词与元信息', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CacheSettingsPage()))),
+        _entry(context, icon: HugeIcons.strokeRoundedDatabaseSync01, title: '诊断日志', subtitle: '后台异常记录与日志导出', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiagnosticsPage()))),
       ])),
       SafeArea(
         top: false,

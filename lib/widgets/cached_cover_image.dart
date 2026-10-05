@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/app_database.dart';
+import '../services/diagnostic_log.dart';
 import '../services/bili_http.dart';
 import '../services/track_enrichment_service.dart';
 import '../models/track.dart';
@@ -223,6 +224,11 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
 
   void _settle(String token, _CoverLoadResult result) {
     if (!mounted || token != _loadKey) return;
+    DiagnosticLog.event('cover.settle', {
+      'source': md5.convert(utf8.encode(token)).toString(),
+      'ready': result.file != null,
+      'httpStatus': result.statusCode,
+    });
     setState(() {
       _file = result.file;
       _httpStatus = result.statusCode;
@@ -265,7 +271,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
 
       // Application Support, not the temp dir: iOS/Android may purge temp
       // under storage pressure, which silently re-downloaded every cover.
-      final supportDir = await getApplicationSupportDirectory();
+      final supportDir = await DiagnosticLog.trace('cover.support_directory', getApplicationSupportDirectory);
       final cacheDir = Directory('${supportDir.path}/bilimusic_covers');
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
@@ -277,14 +283,15 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       // now show the song while its visible cover is still downloading, and
       // exact paths avoid misclassifying uncommon thumbnail sizes as “其它”.
       if (cacheOwner != null) {
-        await AppDatabase.registerCoverCache(
-          cacheOwner,
+        final owner = cacheOwner;
+        await DiagnosticLog.trace('cover.register', () => AppDatabase.registerCoverCache(
+          owner,
           fetchUrl,
           file.path,
-        );
+        ));
       }
 
-      if (await file.exists() && await file.length() > 0) {
+      if (await DiagnosticLog.trace('cover.file_exists', file.exists) && await file.length() > 0) {
         _settle(token, _CoverLoadResult(file: file));
         return;
       }
@@ -292,9 +299,9 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       final _CoverLoadResult cached;
       final existing = _inFlight[fetchUrl];
       if (existing != null) {
-        cached = await existing;
+        cached = await DiagnosticLog.trace('cover.join_download', () => existing);
       } else {
-        final future = _downloadAndCache(fetchUrl, file);
+        final future = DiagnosticLog.trace('cover.download', () => _downloadAndCache(fetchUrl, file));
         _inFlight[fetchUrl] = future;
         try {
           cached = await future;
@@ -310,7 +317,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
         );
       }
       _settle(token, cached);
-    } catch (_) {
+    } catch (error, stack) {
+      DiagnosticLog.event('cover.load_error', {'error': DiagnosticLog.redact('$error'), 'stack': '$stack'});
       _settle(token, const _CoverLoadResult());
     }
   }
@@ -319,7 +327,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   /// kill mid-write can never leave a truncated file cached forever.
   static Future<_CoverLoadResult> _downloadAndCache(String fetchUrl, File file) async {
     try {
-      final req = await _client.getUrl(Uri.parse(fetchUrl));
+      final req = await DiagnosticLog.trace('cover.http_connect', () => _client.getUrl(Uri.parse(fetchUrl)));
       final host = req.uri.host;
       req.headers.set(
         'Referer',
@@ -330,7 +338,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
                 : 'https://www.bilibili.com/',
       );
       req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
+      final res = await DiagnosticLog.trace('cover.http_headers', req.close);
+      DiagnosticLog.event('cover.http_status', {'status': res.statusCode});
 
       if (res.statusCode != 200) {
         final statusCode = res.statusCode;
@@ -342,7 +351,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       try {
         final sink = part.openWrite();
         try {
-          await res.pipe(sink);
+          await DiagnosticLog.trace('cover.http_body', () => res.pipe(sink));
         } finally {
           await sink.close();
         }
@@ -359,7 +368,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           } catch (_) {}
         }
       }
-    } catch (_) {
+    } catch (error, stack) {
+      DiagnosticLog.event('cover.download_error', {'error': DiagnosticLog.redact('$error'), 'stack': '$stack'});
       return const _CoverLoadResult();
     }
   }
@@ -401,7 +411,12 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           height: widget.height,
           fit: widget.fit,
           gaplessPlayback: true,
-          errorBuilder: (context, error, stackTrace) => _buildFallback(),
+          errorBuilder: (context, error, stackTrace) {
+            DiagnosticLog.event('cover.decode_error', {
+              'error': DiagnosticLog.redact('$error'), 'stack': '$stackTrace',
+            });
+            return _buildFallback();
+          },
         );
       case _CoverStatus.failed:
         child = _buildFallback();

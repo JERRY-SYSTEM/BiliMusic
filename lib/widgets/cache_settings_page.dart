@@ -5,6 +5,7 @@ import 'package:hugeicons/hugeicons.dart';
 import '../services/app_database.dart';
 import '../services/cache_inventory.dart';
 import '../services/database_service.dart';
+import '../services/diagnostic_log.dart';
 import '../theme/app_theme.dart';
 import 'cached_cover_image.dart';
 
@@ -27,7 +28,8 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   }
   @override void dispose() { _coverCacheSubscription?.cancel(); super.dispose(); }
   Future<void> _reload() async {
-    final buckets = await CacheInventory.load(await DatabaseService.getDownloadedTracks());
+    final tracks = await DiagnosticLog.trace('cache.downloaded_tracks', DatabaseService.getDownloadedTracks);
+    final buckets = await DiagnosticLog.trace('cache.inventory', () => CacheInventory.load(tracks));
     if (mounted) setState(() { _buckets = buckets; _loading = false; });
   }
   int get _total => _buckets.fold(0, (sum, bucket) => sum + bucket.bytes);

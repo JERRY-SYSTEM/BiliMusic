@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/track.dart';
 import '../widgets/cached_cover_image.dart';
 import 'app_database.dart';
+import 'diagnostic_log.dart';
 
 /// A user-facing cache bucket. A bucket contains every cache artifact that can
 /// be confidently attributed to one song; everything else is [other].
@@ -27,13 +28,13 @@ class CacheInventory {
   CacheInventory._();
 
   static Future<List<CacheBucket>> load(List<Track> tracks) async {
-    final docs = await getApplicationDocumentsDirectory();
-    final support = await getApplicationSupportDirectory();
+    final docs = await DiagnosticLog.trace('cache.documents_directory', getApplicationDocumentsDirectory);
+    final support = await DiagnosticLog.trace('cache.support_directory', getApplicationSupportDirectory);
     final buckets = <String, CacheBucket>{
       for (final track in tracks) track.id: CacheBucket(track: track, files: <File>[]),
     };
     final coverOwnerByPath = <String, String>{};
-    for (final row in await AppDatabase.coverCaches()) {
+    for (final row in await DiagnosticLog.trace('cache.cover_rows', AppDatabase.coverCaches)) {
       try {
         final track = Track.fromMap(AppDatabase.decode(row['track_payload']));
         buckets.putIfAbsent(
@@ -49,8 +50,8 @@ class CacheInventory {
     var otherBytes = 0;
     final otherLyrics = <String>[];
     final lyricBytesByTrack = <String, int>{};
-    final lyricRows = await (await AppDatabase.instance)
-        .query('lyrics', columns: ['track_id', 'lines_json']);
+    final lyricRows = await DiagnosticLog.trace('cache.lyric_rows', () async =>
+      (await AppDatabase.instance).query('lyrics', columns: ['track_id', 'lines_json']));
     for (final row in lyricRows) {
       final trackId = row['track_id'] as String;
       final payload = row['lines_json'] as String?;
@@ -65,9 +66,10 @@ class CacheInventory {
     }
     final coverByTrack = <String, List<File>>{};
     final audioDir = Directory('${docs.path}/bilimusic_audio');
-    final audioOwners = {for (final row in await AppDatabase.downloads()) row['path'] as String: row['track_id'] as String};
+    final audioRows = await DiagnosticLog.trace('cache.audio_rows', () => AppDatabase.downloads());
+    final audioOwners = {for (final row in audioRows) row['path'] as String: row['track_id'] as String};
     if (await audioDir.exists()) {
-      for (final entity in await audioDir.list().toList()) {
+      for (final entity in await DiagnosticLog.trace('cache.audio_list', () => audioDir.list().toList())) {
         if (entity is! File) continue;
         final bucket = buckets[audioOwners[entity.path]];
         (bucket?.files ?? otherFiles).add(entity);
@@ -75,7 +77,7 @@ class CacheInventory {
     }
     final coversDir = Directory('${support.path}/bilimusic_covers');
     if (await coversDir.exists()) {
-      for (final entity in await coversDir.list().toList()) {
+      for (final entity in await DiagnosticLog.trace('cache.cover_list', () => coversDir.list().toList())) {
         if (entity is! File) continue;
         final registeredId = coverOwnerByPath[entity.path] ??
             (entity.path.endsWith('.part')

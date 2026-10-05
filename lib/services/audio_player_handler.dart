@@ -16,6 +16,7 @@ import 'database_service.dart';
 import 'app_database.dart';
 import 'bili_http.dart';
 import 'player_queue_manager.dart';
+import 'diagnostic_log.dart';
 
 enum LoopMode { off, all, one }
 
@@ -70,6 +71,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _userPaused = false;
   bool _restoredWasPlaying = false;
   bool _recovering = false;
+  DateTime? _lastDiagnosticPosition;
   AudioSession? _audioSession;
 
   /// Number of open surfaces that have asked playback not to move on by itself
@@ -294,6 +296,14 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     // tick causes notification/MediaSession churn. The system UI interpolates
     // the notification position from the last state + speed.
     _player.positionStream.listen((position) {
+      final now = DateTime.now();
+      if (_lastDiagnosticPosition == null || now.difference(_lastDiagnosticPosition!).inSeconds >= 60) {
+        _lastDiagnosticPosition = now;
+        DiagnosticLog.event('player.position', {
+          'positionMs': position.inMilliseconds, 'playing': _player.playing,
+          'processing': _player.processingState.name,
+        });
+      }
       _positionController.add(position);
       _updateSystemLyric(position);
       if (_playlist.isNotEmpty) _schedulePersist();
@@ -347,6 +357,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Called whenever the actively-playing track changes (manual or auto).
   void _onActiveTrackChanged(Track track) {
+    DiagnosticLog.event('player.track_changed');
     _queueManager.recordVisit(
       queue: _playlist,
       index: _playlist.indexWhere((item) => item.id == track.id),
@@ -1203,6 +1214,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     if (title == _systemMediaTitle && artist == _systemMediaArtist) return;
     _systemMediaTitle = title;
     _systemMediaArtist = artist;
+    DiagnosticLog.event('system.lyric_changed', {'index': index});
     _publishSystemMediaItem(track, preservePosition: true);
   }
 
@@ -1224,13 +1236,18 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
         bufferedPositionOverride: bufferedPosition,
       );
     }
+    final artwork = _systemArtworkUri(track.coverUrl);
+    DiagnosticLog.event('system.metadata_publish', {
+      'artworkPresent': artwork != null,
+      'artworkLocal': artwork?.scheme == 'file',
+    });
     mediaItem.add(MediaItem(
       id: track.id,
       album: 'BiliMusic',
       title: _systemMediaTitle,
       artist: _systemMediaArtist,
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),
-      artUri: _systemArtworkUri(track.coverUrl),
+      artUri: artwork,
     ));
   }
 
@@ -1259,6 +1276,11 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _prepareSystemArtwork(Track track) {
     final url = track.coverUrl;
+    DiagnosticLog.event('system_art.prepare', {
+      'source': md5.convert(utf8.encode(url)).toString(),
+      'cached': _systemArtworkCache.containsKey(url),
+      'inFlight': _systemArtworkInFlight.containsKey(url),
+    });
     if (url.isEmpty || _systemArtworkCache.containsKey(url) ||
         url.startsWith('/') || url.startsWith('file://') ||
         RegExp(r'^[A-Za-z]:[\\/]').hasMatch(url)) {
@@ -1270,6 +1292,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     unawaited(operation.then((uri) {
       _systemArtworkInFlight.remove(url);
+      DiagnosticLog.event('system_art.result', {'ready': uri != null});
       if (uri == null) return;
       _systemArtworkCache[url] = uri;
       final active = currentTrack;
@@ -1283,18 +1306,18 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<Uri?> _downloadSystemArtwork(String url) async {
     try {
-      final support = await getApplicationSupportDirectory();
+      final support = await DiagnosticLog.trace('system_art.support_directory', getApplicationSupportDirectory);
       final directory = Directory('${support.path}/bilimusic_covers');
       if (!await directory.exists()) await directory.create(recursive: true);
       final key = md5.convert(utf8.encode(url)).toString();
       final file = File('${directory.path}/system_$key.jpg');
-      if (await file.exists() && await file.length() > 0) {
+      if (await DiagnosticLog.trace('system_art.file_exists', file.exists) && await file.length() > 0) {
         return Uri.file(file.path);
       }
 
       final client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
       try {
-        final request = await client.getUrl(Uri.parse(url));
+        final request = await DiagnosticLog.trace('system_art.http_connect', () => client.getUrl(Uri.parse(url)));
         request.headers.set('User-Agent', kBiliUserAgent);
         final host = request.uri.host;
         request.headers.set(
@@ -1305,7 +1328,8 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
                   ? 'https://y.qq.com/'
                   : 'https://www.bilibili.com/',
         );
-        final response = await request.close();
+        final response = await DiagnosticLog.trace('system_art.http_headers', request.close);
+        DiagnosticLog.event('system_art.http_status', {'status': response.statusCode});
         if (response.statusCode != HttpStatus.ok) {
           await response.drain<void>();
           return null;
@@ -1314,7 +1338,7 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
         try {
           final sink = part.openWrite();
           try {
-            await response.pipe(sink);
+            await DiagnosticLog.trace('system_art.http_body', () => response.pipe(sink));
           } finally {
             await sink.close();
           }
@@ -1327,7 +1351,8 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
       } finally {
         client.close(force: true);
       }
-    } catch (error) {
+    } catch (error, stack) {
+      DiagnosticLog.event('system_art.error', {'error': DiagnosticLog.redact('$error'), 'stack': '$stack'});
       debugPrint('System artwork cache failed: $error');
       return null;
     }
