@@ -22,7 +22,7 @@ class DiagnosticLog {
       'dart': Platform.version,
       'app': const String.fromEnvironment('APP_VERSION', defaultValue: '3.12.0'),
       'revision': const String.fromEnvironment('GIT_REVISION', defaultValue: 'unknown'),
-      'flutter': const String.fromEnvironment('FLUTTER_VERSION', defaultValue: 'unknown'),
+      'flutter': const String.fromEnvironment('BILIMUSIC_FLUTTER_VERSION', defaultValue: 'unknown'),
     });
     try {
       final directory = await trace('diagnostics.directory', getApplicationSupportDirectory)
@@ -34,7 +34,7 @@ class DiagnosticLog {
         'os': Platform.operatingSystemVersion,
         'app': const String.fromEnvironment('APP_VERSION', defaultValue: '3.12.0'),
         'revision': const String.fromEnvironment('GIT_REVISION', defaultValue: 'unknown'),
-        'flutter': const String.fromEnvironment('FLUTTER_VERSION', defaultValue: 'unknown'),
+        'flutter': const String.fromEnvironment('BILIMUSIC_FLUTTER_VERSION', defaultValue: 'unknown'),
       });
     } catch (error, stack) {
       event('diagnostics.memory_only', {'error': '$error', 'stack': '$stack'});

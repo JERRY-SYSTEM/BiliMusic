@@ -125,7 +125,7 @@ jobs:
             --build-number "$BUILD_NUMBER" \
             --dart-define="APP_VERSION=$VERSION_NAME" \
             --dart-define="GIT_REVISION=$GITHUB_SHA" \
-            --dart-define="FLUTTER_VERSION=$(flutter --version | head -n 1)"
+            --dart-define="BILIMUSIC_FLUTTER_VERSION=$(flutter --version | head -n 1)"
 
           rm -rf Payload
           mkdir -p Payload
@@ -151,7 +151,7 @@ jobs:
             --build-number "$BUILD_NUMBER" \
             --dart-define="APP_VERSION=$VERSION_NAME" \
             --dart-define="GIT_REVISION=$GITHUB_SHA" \
-            --dart-define="FLUTTER_VERSION=$(flutter --version | head -n 1)"
+            --dart-define="BILIMUSIC_FLUTTER_VERSION=$(flutter --version | head -n 1)"
 
       - name: Check Android build tools 33.0.0
         if: matrix.name == 'android-arm64-v8a'

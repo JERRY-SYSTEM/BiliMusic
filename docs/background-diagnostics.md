@@ -16,5 +16,5 @@
 最多保留 2000 条内存记录。持久化失败或等待时，导出会在最多 3 秒的磁盘读取等待后使用内存记录。
 启动不等待日志目录；不修改原播放、网络请求或缓存重试行为。
 
-Release 工作流会把源码提交和 Flutter 版本写入日志。手动构建可提供 `GIT_REVISION`、`FLUTTER_VERSION`、`APP_VERSION` 三个 `--dart-define`。
+Release 工作流会把源码提交和 Flutter 版本写入日志。手动构建可提供 `GIT_REVISION`、`BILIMUSIC_FLUTTER_VERSION`、`APP_VERSION` 三个 `--dart-define`。`FLUTTER_VERSION` 是框架保留名称，不可作为自定义构建参数。
 需要在 CI 或有 Flutter SDK 的电脑上运行 `flutter analyze` 和 `flutter test test/diagnostic_log_test.dart`，再在 iOS 18.5 实机复现。
