@@ -1196,8 +1196,13 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     final line = index >= 0 ? _systemLyrics[index] : null;
     final lyric = line?.text.trim() ?? '';
     final translation = line?.translation?.trim() ?? '';
-    _systemMediaTitle = lyric.isEmpty ? track.title : lyric;
-    _systemMediaArtist = translation.isNotEmpty ? translation : track.title;
+    final title = lyric.isEmpty ? track.title : lyric;
+    final artist = translation.isNotEmpty ? translation : track.title;
+    // Adjacent LRC entries can contain the same text. Do not rebuild the
+    // native artwork / Now Playing snapshot unless the visible text changes.
+    if (title == _systemMediaTitle && artist == _systemMediaArtist) return;
+    _systemMediaTitle = title;
+    _systemMediaArtist = artist;
     _publishSystemMediaItem(track, preservePosition: true);
   }
 
@@ -1207,10 +1212,9 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   }) {
     final shouldPreservePosition =
         preservePosition && currentTrack?.id == track.id;
-    // Take one snapshot for the whole metadata update. Publishing it first
-    // refreshes audio_service's time anchor before it rebuilds
-    // MPNowPlayingInfo; publishing the identical snapshot afterwards protects
-    // against iOS resetting elapsedPlaybackTime while applying the metadata.
+    // Refresh audio_service's time anchor before it rebuilds Now Playing.
+    // The native metadata update uses this anchor itself; a second identical
+    // playback state adds platform-channel work without changing that anchor.
     final position = shouldPreservePosition ? _player.position : null;
     final bufferedPosition =
         shouldPreservePosition ? _player.bufferedPosition : null;
@@ -1228,14 +1232,6 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),
       artUri: _systemArtworkUri(track.coverUrl),
     ));
-    // Do this only for in-track metadata changes (lyrics/artwork); a real
-    // track change is deliberately reset to zero by [_announce].
-    if (position != null && bufferedPosition != null) {
-      _broadcastState(
-        positionOverride: position,
-        bufferedPositionOverride: bufferedPosition,
-      );
-    }
   }
 
   Uri? _systemArtworkUri(String coverUrl) {
@@ -1251,11 +1247,11 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     final remote = Uri.tryParse(coverUrl);
     if (remote == null) return null;
-    // NetEase rejects the unauthenticated request made by the native Now
-    // Playing implementation. Do not publish the known-broken remote URL;
-    // [_prepareSystemArtwork] will replace it with a local file URI.
-    if (remote.host.contains('music.126.net') ||
-        remote.host.contains('music.163.com')) {
+    // We already download remote artwork in _prepareSystemArtwork. Publishing
+    // its URL here makes audio_service perform another asynchronous cache
+    // lookup (and potentially another download) on every lyric change. Keep
+    // text updates independent of that work; publish the local URI once ready.
+    if (remote.scheme == 'http' || remote.scheme == 'https') {
       return null;
     }
     return remote;

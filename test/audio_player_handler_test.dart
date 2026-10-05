@@ -202,7 +202,7 @@ void main() {
     expect(handler.mediaItem.value?.title, '第一句');
   });
 
-  test('in-track metadata updates are sandwiched by one position snapshot',
+  test('in-track metadata updates refresh the position anchor once',
       () async {
     await handler.playTrack(first, newQueue: [first])
         .timeout(const Duration(seconds: 1));
@@ -225,7 +225,6 @@ void main() {
     expect(events, [
       'state:4250',
       'media:当前歌词',
-      'state:4250',
     ]);
     await stateSubscription.cancel();
     await mediaSubscription.cancel();
@@ -243,6 +242,38 @@ void main() {
     expect(handler.mediaItem.value?.artist, first.title);
     expect(handler.playbackState.value.updatePosition,
         const Duration(seconds: 2));
+  });
+
+  test('unchanged lyric text does not republish system metadata', () async {
+    await handler.playTrack(first, newQueue: [first]);
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '重复歌词'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+    final updates = <MediaItem?>[];
+    final subscription = handler.mediaItem.listen(updates.add);
+    await flushEvents();
+    updates.clear();
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '重复歌词'),
+      LyricLine(time: 3, text: '重复歌词'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+
+    expect(updates, isEmpty);
+    await subscription.cancel();
+  });
+
+  test('remote artwork does not enter the lyric metadata update path', () async {
+    final track = first.copyWith(coverUrl: 'https://example.com/cover.jpg');
+    await handler.playTrack(track, newQueue: [track]);
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '歌词'),
+    ], offsetSeconds: 0);
+
+    expect(handler.mediaItem.value?.title, '歌词');
+    expect(handler.mediaItem.value?.artUri, isNull);
   });
 
   test('EOF advances without prefetch in shuffle mode', () async {
