@@ -2,9 +2,39 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:bilimusic/services/diagnostic_log.dart';
 
 void main() {
+  testWidgets('iOS resource snapshots report descriptor growth and playback context', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    const channel = MethodChannel('bilimusic/diagnostics');
+    var calls = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'resourceSnapshot');
+      calls++;
+      return {'fdCount': 10 + calls, 'categories': {'audio_cache': calls},
+        'softLimit': '256', 'targets': [], 'scanTruncated': false};
+    });
+    try {
+      DiagnosticLog.playbackContext({'nativeQueueLength': 4});
+      await DiagnosticLog.sampleResources('test.first', force: true);
+      await DiagnosticLog.sampleResources('test.second', force: true);
+      await DiagnosticLog.sampleResources('test.throttled');
+      expect(calls, 2);
+      final rows = (await DiagnosticLog.exportText()).trim().split('\n')
+          .map((line) => jsonDecode(line) as Map<String, dynamic>);
+      final second = rows.singleWhere((row) => row['reason'] == 'test.second');
+      expect(second['deltaFromPrevious'], 1);
+      expect(second['categoryDelta'], {'audio_cache': 1});
+      expect(second['nativeQueueLength'], 4);
+    } finally {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('slow operation is reported without cancellation', (tester) async {
     final completer = Completer<int>();
     final operation = DiagnosticLog.trace('test.slow', () => completer.future);

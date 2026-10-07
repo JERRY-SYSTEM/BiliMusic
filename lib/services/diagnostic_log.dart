@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 /// Diagnostics never depend on the playback database. Memory remains usable
 /// for export even when directory lookup or file writes stop completing.
@@ -15,6 +17,58 @@ class DiagnosticLog {
   static Future<void> _writes = Future<void>.value();
   static int _pending = 0;
   static int _operation = 0;
+  static const _resourceChannel = MethodChannel('bilimusic/diagnostics');
+  static bool _resourceBusy = false;
+  static int? _lastResourceSampleMs;
+  static int? _baselineFDCount;
+  static int? _previousFDCount;
+  static int _peakFDCount = 0;
+  static Map<String, int> _previousCategories = {};
+  static Map<String, Object?> _playbackContext = {};
+
+  static void playbackContext(Map<String, Object?> context) {
+    _playbackContext = Map.of(context);
+  }
+
+  /// Samples existing descriptors only. No new periodic timer or playback work
+  /// is introduced; existing position callbacks provide the minute cadence.
+  static Future<void> sampleResources(String reason, {bool force = false}) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS || _resourceBusy) return;
+    final now = _clock.elapsedMilliseconds;
+    if (!force && _lastResourceSampleMs != null && now - _lastResourceSampleMs! < 3000) return;
+    _resourceBusy = true;
+    _lastResourceSampleMs = now;
+    try {
+      final snapshot = await _resourceChannel.invokeMapMethod<String, dynamic>('resourceSnapshot')
+          .timeout(const Duration(seconds: 3));
+      if (snapshot == null) return;
+      final count = (snapshot['fdCount'] as num).toInt();
+      final rawCategories = snapshot['categories'] as Map;
+      final categories = rawCategories.map((key, value) => MapEntry('$key', (value as num).toInt()));
+      _baselineFDCount ??= count;
+      if (count > _peakFDCount) _peakFDCount = count;
+      final delta = <String, int>{
+        for (final key in {...categories.keys, ..._previousCategories.keys})
+          key: (categories[key] ?? 0) - (_previousCategories[key] ?? 0),
+      };
+      event('resources.fd_snapshot', {
+        ...snapshot,
+        'reason': reason,
+        ..._playbackContext,
+        'baselineFDCount': _baselineFDCount,
+        'deltaFromBaseline': count - _baselineFDCount!,
+        'deltaFromPrevious': _previousFDCount == null ? null : count - _previousFDCount!,
+        'categoryDelta': _previousFDCount == null ? null : delta,
+        'peakFDCount': _peakFDCount,
+      });
+      _previousFDCount = count;
+      _previousCategories = categories;
+    } catch (error, stack) {
+      event('resources.sample_error', {'reason': reason, 'error': '$error', 'stack': '$stack'});
+    } finally {
+      _resourceBusy = false;
+    }
+  }
 
   static Future<void> initialize() async {
     event('session.start', {
@@ -24,6 +78,7 @@ class DiagnosticLog {
       'revision': const String.fromEnvironment('GIT_REVISION', defaultValue: 'unknown'),
       'flutter': const String.fromEnvironment('BILIMUSIC_FLUTTER_VERSION', defaultValue: 'unknown'),
     });
+    unawaited(sampleResources('startup'));
     try {
       final directory = await trace('diagnostics.directory', getApplicationSupportDirectory)
           .timeout(const Duration(seconds: 5));
@@ -55,6 +110,14 @@ class DiagnosticLog {
     });
     _lines.add(line);
     if (_lines.length > 2000) _lines.removeFirst();
+    // Capture the process while EMFILE is happening, even if disk logging fails.
+    if (!name.startsWith('resources.') && fields['error'] is String) {
+      final error = (fields['error'] as String).toLowerCase();
+      if (error.contains('too many open files') || error.contains('errno = 24') ||
+          error.contains('underlyingcode: 24') || error.contains('unable to open database file')) {
+        unawaited(sampleResources('error:$name'));
+      }
+    }
     final file = _file;
     if (file == null || _pending >= 100) return;
     _pending++;
@@ -100,6 +163,7 @@ class DiagnosticLog {
       .replaceAll(RegExp(r'(SESSDATA|bili_jct|cookie|authorization)[=:][^\s,;]+', caseSensitive: false), '[credential]');
 
   static Future<String> exportText() async {
+    await sampleResources('export', force: true);
     event('diagnostics.export');
     // Always take the memory snapshot before attempting potentially stuck IO.
     final memory = _lines.join('\n');

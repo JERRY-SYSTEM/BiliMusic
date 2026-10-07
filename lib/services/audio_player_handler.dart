@@ -127,6 +127,16 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   bool get isPlaying => _isPlaying;
   Duration get position => _player.position;
   Future<void> persistPlaybackState() => _persistState();
+  void _updateDiagnosticPlaybackContext() {
+    DiagnosticLog.playbackContext({
+      'nativeQueueLength': _queueSource.length,
+      'nativeIndex': _player.currentIndex,
+      'logicalIndex': _currentIndex,
+      'queueBaseIndex': _queueBaseIndex,
+      'playing': _player.playing,
+      'processing': _player.processingState.name,
+    });
+  }
   LoopMode get loopMode => _loopMode;
   bool get isShuffle => _isShuffle;
   bool get canSkipPrevious {
@@ -299,6 +309,8 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
       final now = DateTime.now();
       if (_lastDiagnosticPosition == null || now.difference(_lastDiagnosticPosition!).inSeconds >= 60) {
         _lastDiagnosticPosition = now;
+        _updateDiagnosticPlaybackContext();
+        unawaited(DiagnosticLog.sampleResources('playback.minute'));
         DiagnosticLog.event('player.position', {
           'positionMs': position.inMilliseconds, 'playing': _player.playing,
           'processing': _player.processingState.name,
@@ -409,6 +421,14 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Announce the newly active track to every observer: the UI stream, the
   /// system media session, the recently-played history and the duration.
   void _announce(Track track) {
+    _updateDiagnosticPlaybackContext();
+    DiagnosticLog.event('player.queue_snapshot', {
+      'nativeQueueLength': _queueSource.length,
+      'nativeIndex': _player.currentIndex,
+      'logicalIndex': _currentIndex,
+      'queueBaseIndex': _queueBaseIndex,
+    });
+    unawaited(DiagnosticLog.sampleResources('track_changed'));
     _systemLyrics = const [];
     _systemLyricsOffset = 0;
     _systemLyricIndex = -1;
@@ -1088,6 +1108,13 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
           succIndex < _playlist.length &&
           _playlist[succIndex].id == next.id) {
         await _queueSource.add(ja.AudioSource.file(path, tag: next));
+        _updateDiagnosticPlaybackContext();
+        DiagnosticLog.event('player.queue_appended', {
+          'nativeQueueLength': _queueSource.length,
+          'nativeIndex': _player.currentIndex,
+          'logicalIndex': _currentIndex,
+        });
+        unawaited(DiagnosticLog.sampleResources('queue_appended'));
       }
     } catch (e) {
       debugPrint('Prefetch next track error: $e');

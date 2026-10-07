@@ -258,6 +258,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    unawaited(DiagnosticLog.sampleResources('lifecycle:${state.name}', force: state == AppLifecycleState.resumed));
     DiagnosticLog.event('app.lifecycle', {
       'state': state.name,
       'playing': _audioHandler.isPlaying,

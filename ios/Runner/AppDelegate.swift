@@ -1,9 +1,13 @@
 import Flutter
 import UIKit
+import Darwin
+import CryptoKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var diagnosticsChannel: FlutterMethodChannel?
+  private var resourceSnapshotBusy = false
+  private let resourceSnapshotQueue = DispatchQueue(label: "bilimusic.diagnostics.resources", qos: .utility)
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -19,6 +23,27 @@ import UIKit
     let channel = FlutterMethodChannel(name: "bilimusic/diagnostics", binaryMessenger: registrar.messenger())
     diagnosticsChannel = channel
     channel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "resourceSnapshot" {
+        guard let self = self else {
+          result(FlutterError(code: "unavailable", message: "Application unavailable", details: nil))
+          return
+        }
+        guard !self.resourceSnapshotBusy else {
+          result(FlutterError(code: "snapshot_busy", message: "Resource scan already running", details: nil))
+          return
+        }
+        self.resourceSnapshotBusy = true
+        let protectedDataAvailable = UIApplication.shared.isProtectedDataAvailable
+        self.resourceSnapshotQueue.async {
+          var snapshot = ResourceDiagnostics.snapshot()
+          snapshot["protectedDataAvailable"] = protectedDataAvailable
+          DispatchQueue.main.async {
+            self.resourceSnapshotBusy = false
+            result(snapshot)
+          }
+        }
+        return
+      }
       guard call.method == "shareLog" else {
         result(FlutterMethodNotImplemented)
         return
@@ -83,5 +108,115 @@ import UIKit
       }
     }
     presenter.present(sheet, animated: true)
+  }
+}
+
+/// Examines existing descriptors without opening, duplicating or closing any.
+/// This is process-wide (including a host such as LiveContainer), not an
+/// attribution of which library created a descriptor. Concurrent IO may race
+/// the scan; counts and targets are observations, not an atomic snapshot.
+enum ResourceDiagnostics {
+  static func category(for path: String) -> String {
+    let lower = path.lowercased()
+    if lower.contains("/bilimusic_audio/") { return "audio_cache" }
+    if lower.contains("/bilimusic_covers/") { return "cover_cache" }
+    if lower.contains("bilimusic_diagnostics") || lower.contains("bilimusic-diagnostics") { return "diagnostic_log" }
+    if lower.hasSuffix(".sqlite") || lower.hasSuffix(".db") || lower.hasSuffix("-wal") || lower.hasSuffix("-shm") { return "database" }
+    if lower.contains("dyld") || lower.hasSuffix(".dylib") || lower.contains(".framework/") { return "library" }
+    if lower.hasPrefix("/dev/") { return "device" }
+    if lower.contains("/livecontainer/") { return "container_other" }
+    if lower.contains("/tmp/") { return "temporary" }
+    return "other_file"
+  }
+
+  private static func path(of fd: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    let status = buffer.withUnsafeMutableBufferPointer {
+      fcntl(fd, F_GETPATH, UnsafeMutableRawPointer($0.baseAddress!))
+    }
+    guard status == 0 else { return nil }
+    return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+  }
+
+  private static func socketCategory(_ fd: Int32) -> String {
+    var type: Int32 = 0
+    var size = socklen_t(MemoryLayout<Int32>.size)
+    let typeOK = getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) == 0
+    var address = sockaddr_storage()
+    var addressSize = socklen_t(MemoryLayout<sockaddr_storage>.size)
+    let addressOK = withUnsafeMutablePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(fd, $0, &addressSize) == 0
+      }
+    }
+    let family = addressOK ? Int32(address.ss_family) : -1
+    let prefix = family == AF_UNIX ? "unix" : family == AF_INET || family == AF_INET6 ? "network" : "unknown"
+    let suffix = !typeOK ? "unknown" : type == SOCK_STREAM ? "stream" : type == SOCK_DGRAM ? "datagram" : "other"
+    return "socket_\(prefix)_\(suffix)"
+  }
+
+  static func snapshot() -> [String: Any] {
+    let started = ProcessInfo.processInfo.systemUptime
+    var limits = rlimit()
+    let limitOK = getrlimit(RLIMIT_NOFILE, &limits) == 0
+    // Bound diagnostic work even if the host has an unusually large limit.
+    let scanLimit = limitOK ? Int(min(limits.rlim_max, rlim_t(32768))) : 4096
+    var count = 0
+    var highest = -1
+    var statFailures = 0
+    var categories: [String: Int] = [:]
+    var groups: [String: [Int]] = [:]
+    var groupCounts: [String: Int] = [:]
+    for number in 0..<max(scanLimit, 0) {
+      let fd = Int32(number)
+      guard fcntl(fd, F_GETFD) >= 0 else { continue }
+      count += 1
+      highest = number
+      var info = stat()
+      var category = "unknown"
+      var target = "unknown"
+      if fstat(fd, &info) == 0 {
+        let type = info.st_mode & mode_t(S_IFMT)
+        if type == mode_t(S_IFSOCK) {
+          category = socketCategory(fd)
+          target = category
+        } else if type == mode_t(S_IFIFO) {
+          category = "pipe"
+          target = "pipe"
+        } else if let path = path(of: fd) {
+          category = self.category(for: path)
+          // Stable identity without exposing filenames, sandbox UUIDs or URLs.
+          let digest = SHA256.hash(data: Data(path.utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }.joined()
+          target = "\(category):\(digest)"
+        } else {
+          category = type == mode_t(S_IFCHR) ? "character_device" : type == mode_t(S_IFDIR) ? "directory" : "unresolved_file"
+          target = category
+        }
+      } else {
+        statFailures += 1
+      }
+      categories[category, default: 0] += 1
+      groupCounts[target, default: 0] += 1
+      if (groups[target]?.count ?? 0) < 8 { groups[target, default: []].append(number) }
+    }
+    let targets: [[String: Any]] = groupCounts.keys.sorted {
+      let left = groupCounts[$0]!, right = groupCounts[$1]!
+      return left == right ? $0 < $1 : left > right
+    }.prefix(64).map {
+      ["target": $0, "count": groupCounts[$0]!, "fdExamples": groups[$0] ?? []]
+    }
+    return [
+      "pid": getpid(), "process": ProcessInfo.processInfo.processName,
+      "containerDetected": NSHomeDirectory().lowercased().contains("/livecontainer/"),
+      "fdCount": count, "highestFD": highest,
+      "softLimit": limitOK ? String(limits.rlim_cur) : "unknown",
+      "hardLimit": limitOK ? String(limits.rlim_max) : "unknown",
+      "scanLimit": scanLimit, "scanTruncated": !limitOK || limits.rlim_max > rlim_t(scanLimit),
+      "statFailures": statFailures, "categories": categories,
+      "targetGroupCount": groupCounts.count, "targets": targets,
+      "targetsTruncated": groupCounts.count > 64,
+      "scanMs": Int((ProcessInfo.processInfo.systemUptime - started) * 1000),
+    ]
   }
 }

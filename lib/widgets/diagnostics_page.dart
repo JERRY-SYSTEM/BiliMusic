@@ -19,6 +19,20 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
   bool _busy = false;
   String? _snapshot;
 
+  Future<void> _capture({bool markProblem = false}) async {
+    setState(() { _busy = true; _snapshot = null; });
+    try {
+      if (markProblem) DiagnosticLog.event('user.problem_observed');
+      await DiagnosticLog.sampleResources(markProblem ? 'user.problem' : 'user.manual', force: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          markProblem ? '已标记故障并请求资源采样，请复制或导出日志' : '已请求资源采样，请复制或导出日志')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _copy() async {
     setState(() => _busy = true);
     try {
@@ -97,10 +111,9 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     body: ListView(padding: const EdgeInsets.all(20), children: [
       const Text('日志会自动记录后台切换、封面加载和缓存扫描。复现后先标记故障，再导出。iPhone 会打开分享面板，可选择“存储到文件”。若保存失败，可复制或查看日志；操作前请保持应用运行。'),
       const SizedBox(height: 16),
-      OutlinedButton(onPressed: _busy ? null : () {
-        DiagnosticLog.event('user.problem_observed');
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已标记当前故障时间')));
-      }, child: const Text('标记刚刚出现的问题')),
+      OutlinedButton(onPressed: _busy ? null : () => _capture(markProblem: true), child: const Text('标记刚刚出现的问题')),
+      const SizedBox(height: 8),
+      OutlinedButton(onPressed: _busy ? null : _capture, child: const Text('采集当前资源占用')),
       const SizedBox(height: 8),
       FilledButton(onPressed: _busy ? null : _export,
         child: Text(_busy ? '处理中…' : '导出诊断日志')),
