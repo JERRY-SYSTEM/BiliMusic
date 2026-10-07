@@ -116,6 +116,20 @@ import CryptoKit
 /// attribution of which library created a descriptor. Concurrent IO may race
 /// the scan; counts and targets are observations, not an atomic snapshot.
 enum ResourceDiagnostics {
+  private static let containerIDPattern = try! NSRegularExpression(
+    pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+  )
+
+  /// Keep the filename and directory structure needed to identify a leak,
+  /// while removing installation/container UUIDs. Never read file contents.
+  static func displayPath(_ path: String) -> String {
+    let range = NSRange(path.startIndex..<path.endIndex, in: path)
+    let sanitized = containerIDPattern.stringByReplacingMatches(
+      in: path, range: range, withTemplate: "<container>"
+    )
+    return String(sanitized.prefix(1024))
+  }
+
   static func category(for path: String) -> String {
     let lower = path.lowercased()
     if lower.contains("/bilimusic_audio/") { return "audio_cache" }
@@ -167,6 +181,7 @@ enum ResourceDiagnostics {
     var categories: [String: Int] = [:]
     var groups: [String: [Int]] = [:]
     var groupCounts: [String: Int] = [:]
+    var groupPaths: [String: String] = [:]
     for number in 0..<max(scanLimit, 0) {
       let fd = Int32(number)
       guard fcntl(fd, F_GETFD) >= 0 else { continue }
@@ -185,10 +200,11 @@ enum ResourceDiagnostics {
           target = "pipe"
         } else if let path = path(of: fd) {
           category = self.category(for: path)
-          // Stable identity without exposing filenames, sandbox UUIDs or URLs.
+          // Keep the original identity so counts can be compared with older logs.
           let digest = SHA256.hash(data: Data(path.utf8)).prefix(8)
             .map { String(format: "%02x", $0) }.joined()
           target = "\(category):\(digest)"
+          if groupPaths[target] == nil { groupPaths[target] = displayPath(path) }
         } else {
           category = type == mode_t(S_IFCHR) ? "character_device" : type == mode_t(S_IFDIR) ? "directory" : "unresolved_file"
           target = category
@@ -203,8 +219,13 @@ enum ResourceDiagnostics {
     let targets: [[String: Any]] = groupCounts.keys.sorted {
       let left = groupCounts[$0]!, right = groupCounts[$1]!
       return left == right ? $0 < $1 : left > right
-    }.prefix(64).map {
-      ["target": $0, "count": groupCounts[$0]!, "fdExamples": groups[$0] ?? []]
+    }.prefix(64).map { target in
+      var entry: [String: Any] = ["target": target, "count": groupCounts[target]!, "fdExamples": groups[target] ?? []]
+      if let path = groupPaths[target] {
+        entry["path"] = path
+        entry["filename"] = (path as NSString).lastPathComponent
+      }
+      return entry
     }
     return [
       "pid": getpid(), "process": ProcessInfo.processInfo.processName,

@@ -6,6 +6,14 @@ import Darwin
 
 class RunnerTests: XCTestCase {
 
+  func testDisplayPathKeepsFileIdentityWithoutContainerUUID() {
+    let path = "/var/mobile/Containers/Data/Application/12345678-1234-1234-1234-123456789ABC/Runner.app/Frameworks/example.framework/example"
+    let displayed = ResourceDiagnostics.displayPath(path)
+    XCTAssertFalse(displayed.contains("12345678-1234-1234-1234-123456789ABC"))
+    XCTAssertTrue(displayed.hasSuffix("Runner.app/Frameworks/example.framework/example"))
+    XCTAssertEqual(ResourceDiagnostics.displayPath("/usr/lib/example.dylib"), "/usr/lib/example.dylib")
+  }
+
   func testSnapshotObservesPipesWithoutClosingThem() {
     var descriptors = [Int32](repeating: -1, count: 2)
     XCTAssertEqual(descriptors.withUnsafeMutableBufferPointer { pipe($0.baseAddress!) }, 0)

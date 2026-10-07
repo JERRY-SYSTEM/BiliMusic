@@ -8,7 +8,9 @@ iOS 原生 `resources.fd_snapshot` 使用 `getrlimit`、`fcntl(F_GETFD/F_GETPATH
 
 记录 `fdCount`、soft/hard limit、从首次采样起的增量、较上次的分类增量、峰值，以及原生队列长度/位置。分类包括 `audio_cache`、`cover_cache`、`database`、`diagnostic_log`、`socket_network_stream/datagram`、`socket_unix_*`、`pipe`、`library` 和无法确定的类型。
 
-`targets` 最多列出 64 个占用组（按数量排序），每组包含数量和最多八个 FD 编号。文件目标使用路径 SHA256 的前八字节，不导出完整路径或用户文件名；socket 仅按地址族与类型分组，不收集地址、端口、网络内容。同一 target 的 count 不断增大可能提示重复打开同一个文件；这不能直接证明哪个库创建了它。
+`targets` 最多列出 64 个占用组（按数量排序），每组包含数量和最多八个 FD 编号。文件目标保留原路径 SHA256 的前八字节作为稳定标识，并增加 `path` 和 `filename`，用于识别反复被打开的库或其它文件。路径里的容器 UUID 替换成 `<container>`，最多保留 1024 个字符；保留文件名和目录结构，不读取文件内容。socket 仅按地址族与类型分组，不收集地址、端口、网络内容。同一 target 的 count 不断增大可能提示重复打开同一个文件；这不能直接证明哪个库创建了它。
+
+如果上一版日志已经显示两个固定 target 持续增长，安装包含路径字段的新版本后只需播放一两分钟，再手动采样并复制日志即可识别文件。无需等到句柄耗尽。重新安装后容器路径可能变化，target 哈希也可能变化，应结合路径、分类和数量增长匹配。
 
 统计覆盖当前进程。如果 App 运行于 LiveContainer，则可能同时包含宿主的资源，不能把所有占用都归给播放器。系统音频服务其它进程及 Mach port 不在此统计内。高编号不代表数量多，应查看 `fdCount` 和类型趋势。
 
