@@ -59,7 +59,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, double> _heightCache = {};
 
-  int _activeIndex = 0;
+  int _activeIndex = -1;
   DateTime _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// While true the user is in control and auto-scroll stands down.
@@ -86,6 +86,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   @override
   void initState() {
     super.initState();
+    _activeIndex = findActiveLyricIndex(
+      widget.lines,
+      widget.positionNotifier.value,
+      offsetSeconds: widget.offset,
+    );
     widget.positionNotifier.addListener(_onPosition);
   }
 
@@ -121,32 +126,17 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     if (!force && now.difference(_lastUpdate).inMilliseconds < 150) return;
     _lastUpdate = now;
 
-    final posSec =
-        (widget.positionNotifier.value.inMilliseconds / 1000.0) + widget.offset;
-    final newIndex = _findActiveIndex(posSec);
+    final newIndex = findActiveLyricIndex(
+      widget.lines,
+      widget.positionNotifier.value,
+      offsetSeconds: widget.offset,
+    );
     if (newIndex != _activeIndex || force) {
       setState(() => _activeIndex = newIndex);
       if (widget.autoFollow && !_userBrowsing) {
         _scrollToActive();
       }
     }
-  }
-
-  int _findActiveIndex(double posSec) {
-    final lines = widget.lines;
-    int lo = 0;
-    int hi = lines.length - 1;
-    int ans = 0;
-    while (lo <= hi) {
-      final mid = (lo + hi) >> 1;
-      if (lines[mid].time <= posSec) {
-        ans = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return ans;
   }
 
   void _beginBrowsing() {
@@ -203,7 +193,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   }
 
   void _scrollToActive({bool animate = true}) {
-    if (!_scrollController.hasClients || widget.lines.isEmpty) return;
+    if (!_scrollController.hasClients || widget.lines.isEmpty ||
+        _activeIndex < 0) return;
 
     double accumulated = 0.0;
     for (int i = 0; i < _activeIndex && i < widget.lines.length; i++) {
@@ -362,7 +353,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     final line = widget.lines[index];
     final isActive = index == _activeIndex;
     final isSelected = _userBrowsing && index == _selectionIndex;
-    final focusIndex = _selectionIndex ?? _activeIndex;
+    final focusIndex = _selectionIndex ?? (_activeIndex < 0 ? 0 : _activeIndex);
     final distance = (index - focusIndex).abs();
     final opacity = isActive || isSelected
         ? 1.0

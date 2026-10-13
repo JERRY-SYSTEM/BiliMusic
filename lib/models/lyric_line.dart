@@ -1,3 +1,27 @@
+/// Selects the last line whose timestamp has been reached, or -1 before the
+/// first line. Both in-app highlighting and system metadata use this timeline.
+/// Lines must be sorted by time; a positive offset advances the lyrics.
+int findActiveLyricIndex(
+  List<LyricLine> lines,
+  Duration position, {
+  double offsetSeconds = 0,
+}) {
+  final seconds = position.inMilliseconds / 1000.0 + offsetSeconds;
+  var lo = 0;
+  var hi = lines.length - 1;
+  var index = -1;
+  while (lo <= hi) {
+    final mid = (lo + hi) >> 1;
+    if (lines[mid].time <= seconds) {
+      index = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return index;
+}
+
 class LyricLine {
   final double time; // in seconds
   final String text;
