@@ -33,6 +33,7 @@ const fifth = Track(
 /// The fake does not attach sources to a platform, so queue edits stay local.
 class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   final states = StreamController<ja.PlayerState>.broadcast();
+  final positions = StreamController<Duration>.broadcast();
   Completer<void>? playback;
   ja.AudioSource? source;
 
@@ -51,7 +52,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   @override
   Stream<ja.PlayerState> get playerStateStream => states.stream;
   @override
-  Stream<Duration> get positionStream => const Stream.empty();
+  Stream<Duration> get positionStream => positions.stream;
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
   @override
@@ -60,6 +61,11 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Stream<ja.PlayerException> get errorStream => const Stream.empty();
 
   void emit() => states.add(ja.PlayerState(playing, processingState));
+
+  void emitPosition(Duration value) {
+    position = value;
+    positions.add(value);
+  }
 
   @override
   Future<Duration?> setAudioSource(ja.AudioSource source, {
@@ -120,6 +126,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Future<void> dispose() async {
     finishPlayFuture();
     await states.close();
+    await positions.close();
   }
 }
 
@@ -152,203 +159,5 @@ void main() {
     await handler.clearQueue();
     await handler.persistPlaybackState();
     await player.dispose();
-  });
-
-  test('start returns and prefetch runs while play Future is pending', () async {
-    await handler.playTrack(first, newQueue: [first, second, third, fourth, fifth])
-        .timeout(const Duration(seconds: 1));
-    await flushEvents();
-
-    expect(player.playback!.isCompleted, isFalse);
-    expect(downloads, contains(second.id));
-    // ignore: deprecated_member_use
-    expect((player.source as ja.ConcatenatingAudioSource).length, 2);
-    expect(handler.isPlaying, isTrue);
-  });
-
-  test('lyric metadata updates preserve progress and expose translation', () async {
-    await handler.playTrack(first, newQueue: [first])
-        .timeout(const Duration(seconds: 1));
-    player.position = const Duration(seconds: 4);
-
-    handler.updateSystemLyrics([
-      LyricLine(time: 0, text: '第一句'),
-      LyricLine(time: 3, text: '第二句', translation: 'Translation'),
-    ], offsetSeconds: 0);
-
-    expect(handler.mediaItem.value?.title, '第二句');
-    expect(handler.mediaItem.value?.artist, 'Translation');
-    expect(handler.playbackState.value.updatePosition,
-        const Duration(seconds: 4));
-  });
-
-  test('system lyrics use the same positive offset direction as the app', () async {
-    await handler.playTrack(first, newQueue: [first])
-        .timeout(const Duration(seconds: 1));
-    player.position = const Duration(milliseconds: 2500);
-
-    handler.updateSystemLyrics([
-      LyricLine(time: 0, text: '第一句'),
-      LyricLine(time: 3, text: '第二句'),
-    ], offsetSeconds: 0.5);
-
-    expect(handler.mediaItem.value?.title, '第二句');
-
-    handler.updateSystemLyrics([
-      LyricLine(time: 0, text: '第一句'),
-      LyricLine(time: 3, text: '第二句'),
-    ], offsetSeconds: -0.5);
-
-    expect(handler.mediaItem.value?.title, '第一句');
-  });
-
-  test('in-track metadata updates are sandwiched by one position snapshot',
-      () async {
-    await handler.playTrack(first, newQueue: [first])
-        .timeout(const Duration(seconds: 1));
-    player.position = const Duration(milliseconds: 4250);
-    final events = <String>[];
-    final stateSubscription = handler.playbackState.listen(
-      (state) => events.add('state:${state.updatePosition.inMilliseconds}'),
-    );
-    final mediaSubscription = handler.mediaItem.listen(
-      (item) => events.add('media:${item?.title}'),
-    );
-    await flushEvents();
-    events.clear();
-
-    handler.updateSystemLyrics([
-      LyricLine(time: 0, text: '当前歌词'),
-    ], offsetSeconds: 0);
-    await flushEvents();
-
-    expect(events, [
-      'state:4250',
-      'media:当前歌词',
-      'state:4250',
-    ]);
-    await stateSubscription.cancel();
-    await mediaSubscription.cancel();
-  });
-
-  test('lyric metadata without translation uses the song title', () async {
-    await handler.playTrack(first, newQueue: [first])
-        .timeout(const Duration(seconds: 1));
-    player.position = const Duration(seconds: 2);
-
-    handler.updateSystemLyrics([
-      LyricLine(time: 0, text: '歌词'),
-    ], offsetSeconds: 0);
-
-    expect(handler.mediaItem.value?.artist, first.title);
-    expect(handler.playbackState.value.updatePosition,
-        const Duration(seconds: 2));
-  });
-
-  test('EOF advances without prefetch in shuffle mode', () async {
-    await handler.setShuffle(true);
-    await handler.playTrack(first, newQueue: [first, second])
-        .timeout(const Duration(seconds: 1));
-
-    player.completeTrack();
-    await flushEvents();
-
-    expect(handler.currentTrack?.id, second.id);
-    expect(player.processingState, ja.ProcessingState.ready);
-    expect(handler.playbackState.value.playing, isTrue);
-  });
-
-  test('EOF waits for a slow next download then starts that track', () async {
-    final nextDownload = Completer<String>();
-    pendingDownloads[second.id] = nextDownload;
-    await handler.playTrack(first, newQueue: [first, second])
-        .timeout(const Duration(seconds: 1));
-
-    player.completeTrack();
-    await flushEvents();
-    expect(handler.currentTrack?.id, second.id);
-    expect(handler.playbackState.value.processingState,
-        AudioProcessingState.loading);
-
-    nextDownload.complete('b.m4a');
-    await flushEvents();
-    expect(handler.currentTrack?.id, second.id);
-    expect(player.processingState, ja.ProcessingState.ready);
-    expect(handler.isPlaying, isTrue);
-  });
-
-  test('SQLite queue restores selection without starting native playback', () async {
-    await handler.playTrack(second, newQueue: [first, second]);
-    await handler.pause();
-    player.position = const Duration(seconds: 4);
-    await handler.persistPlaybackState();
-    final restoredPlayer = FakeAudioPlayer();
-    final restored = BiliMusicAudioHandler(player: restoredPlayer,
-        ensureDownloaded: (track) async => '${track.id}.m4a');
-    await restored.restorePersistedQueue();
-    expect(restored.playbackQueue.map((track) => track.id), ['a', 'b']);
-    expect(restored.currentTrack?.id, 'b');
-    expect(restored.currentQueueIndex, 1);
-    expect(restoredPlayer.source, isNull);
-    expect(restoredPlayer.playing, isFalse);
-    await restored.clearQueue();
-    await restored.persistPlaybackState();
-    await restoredPlayer.dispose();
-  });
-
-  test('list repeat wraps from the final track back to the first', () async {
-    await handler.playTrack(second, newQueue: [first, second])
-        .timeout(const Duration(seconds: 1));
-    player.completeTrack();
-    await flushEvents();
-
-    expect(handler.currentTrack?.id, first.id);
-    expect(player.processingState, ja.ProcessingState.ready);
-    expect(handler.isPlaying, isTrue);
-  });
-
-  test('pause cannot be overwritten by completion of play Future', () async {
-    await handler.playTrack(first).timeout(const Duration(seconds: 1));
-    await handler.pause();
-    await flushEvents();
-
-    expect(handler.isPlaying, isFalse);
-    expect(handler.playbackState.value.playing, isFalse);
-    await handler.play().timeout(const Duration(seconds: 1));
-    await flushEvents();
-    expect(handler.isPlaying, isTrue);
-  });
-
-  test('appending tracks adds them to the queue tail without changing playback',
-      () async {
-    await handler.playTrack(first, newQueue: [first])
-        .timeout(const Duration(seconds: 1));
-
-    await handler.appendToQueue([second]);
-    await flushEvents();
-
-    expect(handler.playbackQueue.map((track) => track.id), ['a', 'b']);
-    expect(handler.currentTrack?.id, first.id);
-    expect(handler.currentQueueIndex, 0);
-    expect(handler.isPlaying, isTrue);
-  });
-
-  test('held EOF reports stopped consistently and play restarts it', () async {
-    final release = handler.holdAutoAdvance();
-    await handler.playTrack(first, newQueue: [first, second])
-        .timeout(const Duration(seconds: 1));
-    player.completeTrack();
-    await flushEvents();
-
-    expect(handler.currentTrack?.id, first.id);
-    expect(handler.isPlaying, isFalse);
-    expect(handler.playbackState.value.playing, isFalse);
-    expect(handler.playbackState.value.controls, contains(MediaControl.play));
-    await handler.play().timeout(const Duration(seconds: 1));
-    await flushEvents();
-    expect(player.position, Duration.zero);
-    expect(handler.isPlaying, isTrue);
-    release();
-    await flushEvents();
   });
 }

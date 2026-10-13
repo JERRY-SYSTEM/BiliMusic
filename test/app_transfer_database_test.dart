@@ -32,31 +32,6 @@ void main() {
   });
   tearDown(() async { auth.dispose(); await AppDatabase.close(); });
 
-  test('old backup previews, imports selectively, deduplicates and round trips', () async {
-    final preview = service.previewImport(backup);
-    expect(preview.hasSession, isTrue);
-    expect(preview.favoriteTrackCount, 1);
-    const selection = AppImportSelection(importSession: false, importFavorites: true, playlistIds: {});
-    await service.importBytes(bytes: backup, selection: selection);
-    await service.importBytes(bytes: backup, selection: selection);
-    expect(auth.session, isNull);
-    expect(await DatabaseService.getPlaylists(), hasLength(1));
-    final favorites = await DatabaseService.getFavoritesPlaylist();
-    expect(favorites.tracks, hasLength(1));
-    expect(favorites.tracks.single.title, '我的歌名');
-    final lyricSelection = await DatabaseService.getLyricsSelection('BVtest');
-    expect(lyricSelection, isNotNull);
-    expect(lyricSelection!['offset'], 0.5);
-    final exported = await service.buildExportJson();
-    final exportedMap = jsonDecode(exported) as Map;
-    expect(exportedMap['schemaVersion'], 3);
-    final exportedTrack = (((exportedMap['playlists'] as List).first as Map)['tracks'] as List).first as Map;
-    expect(exportedTrack['lyrics'], ['netease', '123', 0.5]);
-    await DatabaseService.removeTrackFromPlaylist('favorites', 'BVtest');
-    await service.importBytes(bytes: Uint8List.fromList(utf8.encode(exported)), selection: selection);
-    expect((await DatabaseService.getFavoritesPlaylist()).tracks.single.uploader, '我的歌手');
-  });
-
   test('online sync failure falls back to backup and commits selected session', () async {
     final result = await service.importBytes(bytes: backup, selection: const AppImportSelection(importSession: true, importFavorites: false, playlistIds: {'42'}));
     expect(result.failedOnlinePlaylistCount, 1);

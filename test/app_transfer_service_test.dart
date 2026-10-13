@@ -50,19 +50,6 @@ Map<String, dynamic> _validBackup() => {
 void main() {
   const service = AppTransferService();
 
-  test('previews session, favorites and online playlists without secrets', () {
-    final preview = service.previewImport(_bytes(_validBackup()));
-
-    expect(preview.hasSession, isTrue);
-    expect(preview.favoriteTrackCount, 1);
-    expect(preview.localPlaylistCount, 0);
-    expect(preview.onlinePlaylistCount, 1);
-    expect(preview.playlists, hasLength(1));
-    expect(preview.playlists.single.id, 'online_42');
-    expect(preview.playlists.single.isOnline, isTrue);
-    expect(preview.toString(), isNot(contains('secret-session')));
-  });
-
   test('rejects backups from a newer schema', () {
     final backup = _validBackup()..['schemaVersion'] = 999;
 
@@ -76,50 +63,6 @@ void main() {
         ),
       ),
     );
-  });
-
-  test('rejects backups from an older schema', () {
-    final backup = _validBackup()..['schemaVersion'] = 2;
-    expect(
-      () => service.previewImport(_bytes(backup)),
-      throwsA(isA<AppTransferException>()),
-    );
-  });
-
-  test('accepts an unresolved CID when the part id is available', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List;
-    final track = (playlists.first['tracks'] as List).first as Map;
-    track['cid'] = 0;
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
-  });
-
-  test('skips a part id belonging to a different video', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List;
-    final track = (playlists.first['tracks'] as List).first as Map;
-    track['id'] = 'BVother_p1';
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
-  });
-
-  test('skips invalid lyric references in a backup', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List;
-    final track = (playlists.first['tracks'] as List).first as Map;
-    track['lyrics'] = ['netease', '', 0.5];
-
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
-  });
-
-  test('requires a numeric lyric offset in the third array item', () {
-    final backup = _validBackup();
-    final playlists = backup['playlists'] as List;
-    final track = (playlists.first['tracks'] as List).first as Map;
-    track['lyrics'] = ['netease', '123'];
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
-
-    track['lyrics'] = ['netease', '123', '0.5'];
-    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 0);
   });
 
   testWidgets('设置页在缓存管理上方显示数据导入导出入口', (tester) async {

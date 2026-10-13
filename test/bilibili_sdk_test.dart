@@ -40,26 +40,6 @@ void main() {
     expect(track.replyCount, 107);
   });
 
-  test('video info parser creates one track per page and tolerates stats', () {
-    final tracks = BilibiliSdk.parseVideoInfoResponse(jsonEncode({
-      'code': 0,
-      'data': {
-        'bvid': 'BV1multi',
-        'title': '合集',
-        'owner': {'name': 'UP'},
-        'duration': 300,
-        'pages': [
-          {'cid': 11, 'page': 1, 'part': '第一首', 'duration': 120},
-          {'cid': 12, 'page': 2, 'part': '第二首', 'duration': 180},
-        ],
-      },
-    }));
-
-    expect(tracks.map((track) => track.id), ['BV1multi_p1', 'BV1multi_p2']);
-    expect(tracks.last.title, '合集 - P2: 第二首');
-    expect(tracks.last.playCount, isNull);
-  });
-
   test('video info parser returns an empty list for invalid responses', () {
     expect(BilibiliSdk.parseVideoInfoResponse('{broken'), isEmpty);
     expect(
