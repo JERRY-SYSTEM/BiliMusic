@@ -33,6 +33,7 @@ const fifth = Track(
 /// The fake does not attach sources to a platform, so queue edits stay local.
 class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   final states = StreamController<ja.PlayerState>.broadcast();
+  final positions = StreamController<Duration>.broadcast();
   Completer<void>? playback;
   ja.AudioSource? source;
 
@@ -51,7 +52,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   @override
   Stream<ja.PlayerState> get playerStateStream => states.stream;
   @override
-  Stream<Duration> get positionStream => const Stream.empty();
+  Stream<Duration> get positionStream => positions.stream;
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
   @override
@@ -60,6 +61,11 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Stream<ja.PlayerException> get errorStream => const Stream.empty();
 
   void emit() => states.add(ja.PlayerState(playing, processingState));
+
+  void emitPosition(Duration value) {
+    position = value;
+    positions.add(value);
+  }
 
   @override
   Future<Duration?> setAudioSource(ja.AudioSource source, {
@@ -120,6 +126,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Future<void> dispose() async {
     finishPlayFuture();
     await states.close();
+    await positions.close();
   }
 }
 
@@ -182,6 +189,41 @@ void main() {
         const Duration(seconds: 4));
   });
 
+  test('system lyric is published before the UI receives each line change',
+      () async {
+    await handler.playTrack(first, newQueue: [first]);
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: 'First line'),
+      LyricLine(time: 0.1, text: 'Second line'),
+      LyricLine(time: 0.2, text: 'Third line'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+
+    final events = <String>[];
+    final mediaSubscription = handler.mediaItem.listen(
+      (item) => events.add('media:${item?.title}'),
+    );
+    final positionSubscription = handler.positionStream.listen((position) {
+      events.add('ui:${handler.mediaItem.value?.title}');
+    });
+    await flushEvents();
+    events.clear();
+
+    player.emitPosition(const Duration(milliseconds: 100));
+    await flushEvents();
+    player.emitPosition(const Duration(milliseconds: 200));
+    await flushEvents();
+
+    expect(events, [
+      'media:Second line',
+      'ui:Second line',
+      'media:Third line',
+      'ui:Third line',
+    ]);
+    await mediaSubscription.cancel();
+    await positionSubscription.cancel();
+  });
+
   test('system lyrics use the same positive offset direction as the app', () async {
     await handler.playTrack(first, newQueue: [first])
         .timeout(const Duration(seconds: 1));
@@ -202,7 +244,19 @@ void main() {
     expect(handler.mediaItem.value?.title, '第一句');
   });
 
-  test('in-track metadata updates are sandwiched by one position snapshot',
+  test('system title remains the song title before the first lyric', () async {
+    await handler.playTrack(first, newQueue: [first]);
+    player.position = const Duration(milliseconds: 999);
+    final lines = [LyricLine(time: 1, text: '第一句')];
+    handler.updateSystemLyrics(lines, offsetSeconds: 0);
+    expect(handler.mediaItem.value?.title, first.title);
+
+    player.position = const Duration(seconds: 1);
+    handler.updateSystemLyrics(lines, offsetSeconds: 0);
+    expect(handler.mediaItem.value?.title, '第一句');
+  });
+
+  test('in-track metadata updates refresh the position anchor once',
       () async {
     await handler.playTrack(first, newQueue: [first])
         .timeout(const Duration(seconds: 1));
@@ -225,7 +279,6 @@ void main() {
     expect(events, [
       'state:4250',
       'media:当前歌词',
-      'state:4250',
     ]);
     await stateSubscription.cancel();
     await mediaSubscription.cancel();
@@ -243,6 +296,38 @@ void main() {
     expect(handler.mediaItem.value?.artist, first.title);
     expect(handler.playbackState.value.updatePosition,
         const Duration(seconds: 2));
+  });
+
+  test('unchanged lyric text does not republish system metadata', () async {
+    await handler.playTrack(first, newQueue: [first]);
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '重复歌词'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+    final updates = <MediaItem?>[];
+    final subscription = handler.mediaItem.listen(updates.add);
+    await flushEvents();
+    updates.clear();
+
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '重复歌词'),
+      LyricLine(time: 3, text: '重复歌词'),
+    ], offsetSeconds: 0);
+    await flushEvents();
+
+    expect(updates, isEmpty);
+    await subscription.cancel();
+  });
+
+  test('remote artwork does not enter the lyric metadata update path', () async {
+    final track = first.copyWith(coverUrl: 'https://example.com/cover.jpg');
+    await handler.playTrack(track, newQueue: [track]);
+    handler.updateSystemLyrics([
+      LyricLine(time: 0, text: '歌词'),
+    ], offsetSeconds: 0);
+
+    expect(handler.mediaItem.value?.title, '歌词');
+    expect(handler.mediaItem.value?.artUri, isNull);
   });
 
   test('EOF advances without prefetch in shuffle mode', () async {
