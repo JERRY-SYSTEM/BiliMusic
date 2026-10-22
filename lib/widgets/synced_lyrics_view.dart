@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
 import '../theme/motion.dart';
 import '../models/lyric_line.dart';
+import 'word_lyric_text.dart';
 
 /// Synced lyrics that highlight and auto-scroll to the active line.
 ///
@@ -74,6 +75,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   /// same scale the Text widgets render with, or rows misalign once the user
   /// raises the OS font size.
   TextScaler _textScaler = TextScaler.noScaling;
+  TextDirection _textDirection = TextDirection.ltr;
 
   static const Duration _browseGrace = Duration(seconds: 5);
 
@@ -102,7 +104,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     }
     if (oldWidget.lines != widget.lines ||
         oldWidget.offset != widget.offset ||
-        oldWidget.calibrating != widget.calibrating) {
+        oldWidget.calibrating != widget.calibrating ||
+        oldWidget.showTranslation != widget.showTranslation) {
       _heightCache.clear();
       _selectionIndex = null;
       _onPosition(force: true);
@@ -189,8 +192,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   }
 
   void _scrollToActive({bool animate = true}) {
-    if (!_scrollController.hasClients || widget.lines.isEmpty ||
-        _activeIndex < 0) return;
+    if (!_scrollController.hasClients ||
+        widget.lines.isEmpty ||
+        _activeIndex < 0) {
+      return;
+    }
 
     double accumulated = 0.0;
     for (int i = 0; i < _activeIndex && i < widget.lines.length; i++) {
@@ -243,13 +249,14 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   /// Measured row height, memoised per (text, state, width, font scale).
   double _itemHeight(LyricLine line, bool isActive) {
     final key = '${line.text} ${line.translation ?? ''} $isActive'
-        ' ${_lineWidth.round()} ${_textScaler.scale(100)}';
+        ' $_lineWidth ${_textScaler.scale(100)} $_textDirection';
     final cached = _heightCache[key];
     if (cached != null) return cached;
 
     double height = 36.0; // vertical padding: 18 + 18
     height += _measureText(line.text, isActive ? 30.0 : 24.0,
-        isActive ? FontWeight.w800 : FontWeight.w500);
+        isActive ? FontWeight.w800 : FontWeight.w500, height: 1.25,
+        letterSpacing: isActive ? -0.4 : -0.2);
     if (widget.showTranslation &&
         line.translation != null &&
         line.translation!.isNotEmpty) {
@@ -263,18 +270,20 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     return height;
   }
 
-  double _measureText(String text, double fontSize, FontWeight weight) {
+  double _measureText(String text, double fontSize, FontWeight weight,
+      {double height = 1.35, double? letterSpacing}) {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(fontSize: fontSize, fontWeight: weight, height: 1.35),
+        style: TextStyle(fontSize: fontSize, fontWeight: weight, height: height,
+          letterSpacing: letterSpacing),
       ),
-      textDirection: TextDirection.ltr,
+      textDirection: _textDirection,
       textScaler: _textScaler,
     )..layout(maxWidth: _lineWidth);
-    final height = painter.height;
+    final measuredHeight = painter.height;
     painter.dispose();
-    return height;
+    return measuredHeight;
   }
 
   // ---------------------------------------------------------------------------
@@ -288,9 +297,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportHeight = constraints.maxHeight;
-        _lineWidth = constraints.maxWidth;
+        // Each tile has 8 px of horizontal padding on both sides.
+        _lineWidth = (constraints.maxWidth - 16).clamp(0.0, double.infinity);
         _topPadding = _viewportHeight * 0.42;
         _textScaler = MediaQuery.textScalerOf(context);
+        _textDirection = Directionality.of(context);
 
         return Stack(
           children: [
@@ -390,7 +401,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                       ? [Shadow(color: context.palette.accent50, blurRadius: 18)]
                       : null,
                 ),
-                child: Text(line.text),
+                child: isActive && line.words.isNotEmpty
+                    ? WordLyricText(line: line, position: widget.positionNotifier,
+                        offsetSeconds: widget.offset)
+                    : Text(line.text),
               ),
               if (widget.showTranslation &&
                   line.translation != null &&

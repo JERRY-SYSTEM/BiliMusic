@@ -22,22 +22,53 @@ int findActiveLyricIndex(
   return index;
 }
 
+/// A provider-supplied syllable or word. Times are absolute milliseconds.
+class LyricWord {
+  const LyricWord({required this.text, required this.startMs, required this.endMs});
+
+  final String text;
+  final int startMs;
+  final int endMs;
+
+  double progress(int positionMs) => endMs <= startMs
+      ? (positionMs >= startMs ? 1 : 0)
+      : ((positionMs - startMs) / (endMs - startMs)).clamp(0.0, 1.0);
+
+  Map<String, dynamic> toMap() => {'text': text, 'startMs': startMs, 'endMs': endMs};
+
+  factory LyricWord.fromMap(Map<String, dynamic> map) => LyricWord(
+    text: map['text'] as String,
+    startMs: (map['startMs'] as num).toInt(),
+    endMs: (map['endMs'] as num).toInt(),
+  );
+}
+
 class LyricLine {
   final double time; // in seconds
   final String text;
   final String? translation;
+  final int? endMs;
+  final List<LyricWord> words;
 
   LyricLine({
     required this.time,
     required this.text,
     this.translation,
+    this.endMs,
+    this.words = const [],
   });
+
+  LyricLine withTranslation(String? value) => LyricLine(
+    time: time, text: text, translation: value, endMs: endMs, words: words,
+  );
 
   Map<String, dynamic> toMap() {
     return {
       'time': time,
       'text': text,
       'translation': translation,
+      if (endMs != null) 'endMs': endMs,
+      if (words.isNotEmpty) 'words': words.map((word) => word.toMap()).toList(),
     };
   }
 
@@ -46,6 +77,9 @@ class LyricLine {
       time: (map['time'] as num).toDouble(),
       text: map['text'] as String,
       translation: map['translation'] as String?,
+      endMs: (map['endMs'] as num?)?.toInt(),
+      words: (map['words'] as List? ?? const []).map((word) =>
+        LyricWord.fromMap(Map<String, dynamic>.from(word as Map))).toList(),
     );
   }
 }
@@ -68,6 +102,9 @@ class LyricSearchCandidate {
     required this.artist,
     required this.provider,
     this.pictureUrl,
+    this.songId,
+    this.albumName,
+    this.durationSeconds,
   });
 
   final String id;
@@ -75,6 +112,10 @@ class LyricSearchCandidate {
   final String artist;
   final LyricProvider provider;
   final String? pictureUrl;
+  // QQ's lyric service requires these catalog fields, not just songmid.
+  final int? songId;
+  final String? albumName;
+  final int? durationSeconds;
 
   LyricsReference get reference => LyricsReference(
         provider: provider,
@@ -125,11 +166,19 @@ class LyricsReference {
 }
 
 class LyricsResult {
+  // v3 retries the LRC fallbacks saved before the EAPI session / QRC key fix.
+  static const currentCacheVersion = 1;
   final String source; // provider api name | 'none'
   final String? songTitle;
   final String? artistName;
   final List<LyricLine> lines;
   final LyricsReference? reference;
+  final int cacheVersion;
+
+  bool get needsWordLyricsUpgrade =>
+      cacheVersion < currentCacheVersion &&
+      !lines.any((line) => line.words.isNotEmpty) &&
+      (cacheVersion < 2 || source != LyricProvider.kugou.apiName);
 
   const LyricsResult({
     required this.source,
@@ -137,11 +186,13 @@ class LyricsResult {
     this.artistName,
     required this.lines,
     this.reference,
+    this.cacheVersion = currentCacheVersion,
   });
 
   Map<String, dynamic> toMap() {
     return {
       'source': source,
+      'cacheVersion': cacheVersion,
       'songTitle': songTitle,
       'artistName': artistName,
       'lines': lines.map((l) => l.toMap()).toList(),
@@ -158,6 +209,7 @@ class LyricsResult {
     final rawLines = map['lines'] as List;
     return LyricsResult(
       source: source,
+      cacheVersion: (map['cacheVersion'] as num?)?.toInt() ?? 1,
       songTitle: map['songTitle'] as String?,
       artistName: map['artistName'] as String?,
       reference: map['reference'] is Map

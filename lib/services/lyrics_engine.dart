@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/lyric_line.dart';
 import 'bili_http.dart';
+import 'word_lyrics_parser.dart';
+import 'netease_lyrics_client.dart';
 
 class _ArtistResolution {
   const _ArtistResolution(this.artist, this.bonus);
@@ -27,7 +29,9 @@ class LyricsRequestException implements Exception {
 
 class LyricsEngine {
   static final HttpClient _client = biliHttpClient();
+  static final NetEaseLyricsClient _neteaseLyricsClient = NetEaseLyricsClient(_client);
   static final Map<String, Future<String?>> _neteasePictureCache = {};
+  static Future<Map<String, dynamic>>? _tencentSession;
 
   static String? _normalizePictureUrl(Object? value) {
     final raw = value?.toString().trim() ?? '';
@@ -60,11 +64,11 @@ class LyricsEngine {
 
   static Future<String?> _httpGet(String urlStr, {Map<String, String>? headers}) async {
     try {
-      final req = await _client.getUrl(Uri.parse(urlStr));
+      final req = await _client.getUrl(Uri.parse(urlStr)).timeout(const Duration(seconds: 12));
       headers?.forEach((k, v) => req.headers.set(k, v));
-      final res = await req.close();
+      final res = await req.close().timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
-        return await res.transform(utf8.decoder).join();
+        return await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 12));
       }
       // Drain non-200 bodies so the connection returns to the pool; with
       // maxConnectionsPerHost = 4, a few un-drained 4xx/5xx responses would
@@ -168,6 +172,9 @@ class LyricsEngine {
               title: (song['songname'] ?? '').toString(),
               artist: artists,
               provider: provider,
+              songId: int.tryParse(song['songid']?.toString() ?? ''),
+              albumName: song['albumname']?.toString(),
+              durationSeconds: int.tryParse(song['interval']?.toString() ?? ''),
               pictureUrl: (song['albummid'] ?? '').toString().isEmpty
                   ? null
                   : 'https://y.gtimg.cn/music/photo_new/T002R120x120M000${song['albummid']}.jpg',
@@ -186,17 +193,7 @@ class LyricsEngine {
     try {
       switch (candidate.provider) {
         case LyricProvider.netease:
-          final body = await _httpGet(
-            'https://music.163.com/api/song/lyric?id=${Uri.encodeComponent(candidate.id)}&lv=-1&tv=-1',
-            headers: const {'Referer': 'https://music.163.com'},
-          );
-          if (body == null) return null;
-          final json = jsonDecode(body);
-          return _resultFromRawLyrics(
-            candidate,
-            (json['lrc']?['lyric'] ?? '').toString(),
-            (json['tlyric']?['lyric'] ?? '').toString(),
-          );
+          return await _fetchNetEaseCandidate(candidate);
         case LyricProvider.kugou:
           final searchBody = await _httpGet(
             'https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=${Uri.encodeComponent(candidate.id)}',
@@ -208,6 +205,21 @@ class LyricsEngine {
           final id = entry['id']?.toString() ?? '';
           final accessKey = entry['accesskey']?.toString() ?? '';
           if (id.isEmpty || accessKey.isEmpty) return null;
+          try {
+            final wordBody = await _httpGet(
+              'https://lyrics.kugou.com/download?ver=1&client=pc&id=${Uri.encodeComponent(id)}&accesskey=${Uri.encodeComponent(accessKey)}&fmt=krc&charset=utf8',
+            );
+            if (wordBody != null) {
+              final data = jsonDecode(wordBody);
+              final content = data['content']?.toString() ?? '';
+              if (content.isNotEmpty && data['contenttype'] != 2) {
+                final lines = WordLyricsParser.krc(WordLyricsParser.decryptKrc(content));
+                if (_hasText(lines)) return _candidateResult(candidate, lines);
+              }
+            }
+          } catch (error) {
+            debugPrint('KRC unavailable, using LRC: $error');
+          }
           final downloadBody = await _httpGet(
             'https://lyrics.kugou.com/download?ver=1&client=pc&id=${Uri.encodeComponent(id)}&accesskey=${Uri.encodeComponent(accessKey)}&fmt=lrc&charset=utf8',
           );
@@ -220,8 +232,14 @@ class LyricsEngine {
             '',
           );
         case LyricProvider.tencent:
+          try {
+            final wordResult = await _fetchTencentWords(candidate);
+            if (wordResult != null) return wordResult;
+          } catch (error) {
+            debugPrint('QRC unavailable, using LRC: $error');
+          }
           final body = await _httpGet(
-            'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${Uri.encodeComponent(candidate.id)}&format=json&nobase64=1',
+            'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?${int.tryParse(candidate.id) == null ? 'songmid' : 'musicid'}=${Uri.encodeComponent(candidate.id)}&format=json&nobase64=1',
             headers: const {'Referer': 'https://y.qq.com/'},
           );
           if (body == null) return null;
@@ -255,32 +273,181 @@ class LyricsEngine {
   ) {
     final lines = parseLrc(rawLyrics);
     if (lines.isEmpty) return null;
-    final translations = parseLrc(rawTranslation);
-    if (translations.isNotEmpty) {
-      var translationIndex = 0;
-      for (var index = 0; index < lines.length; index++) {
-        final line = lines[index];
-        while (translationIndex < translations.length &&
-            translations[translationIndex].time < line.time - 0.5) {
-          translationIndex++;
-        }
-        if (translationIndex < translations.length &&
-            (translations[translationIndex].time - line.time).abs() < 0.5) {
-          lines[index] = LyricLine(
-            time: line.time,
-            text: line.text,
-            translation: translations[translationIndex].text,
-          );
-        }
-      }
-    }
-    return LyricsResult(
+    return _candidateResult(candidate, _mergeTranslations(lines, parseLrc(rawTranslation)));
+  }
+
+  static bool _hasText(List<LyricLine> lines) => lines.any((line) => line.text.trim().isNotEmpty);
+
+  static LyricsResult _candidateResult(LyricSearchCandidate candidate, List<LyricLine> lines) => LyricsResult(
       source: candidate.provider.apiName,
       songTitle: candidate.title,
       artistName: candidate.artist,
       lines: lines,
       reference: candidate.reference,
     );
+
+  static List<LyricLine> _mergeTranslations(List<LyricLine> lines, List<LyricLine> translations,
+      {List<LyricLine> originalLrc = const []}) {
+    String normalized(String text) => text.replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '').toLowerCase();
+    var originalIndex = 0;
+    return lines.map((line) {
+      // YRC and LRC may disagree on the start time. Match their text in order
+      // first; repeated choruses must consume distinct original rows.
+      double time = line.time;
+      if (line.words.isNotEmpty && originalLrc.isNotEmpty) {
+        final value = normalized(line.text);
+        if (value.isNotEmpty) {
+          for (var i = originalIndex; i < originalLrc.length; i++) {
+            if (normalized(originalLrc[i].text) == value) {
+              time = originalLrc[i].time;
+              originalIndex = i + 1;
+              break;
+            }
+          }
+        }
+      }
+      LyricLine? closest;
+      var distance = 0.5;
+      for (final translation in translations) {
+        final delta = (translation.time - time).abs();
+        if (delta < distance) { closest = translation; distance = delta; }
+      }
+      return closest == null ? line : line.withTranslation(closest.text);
+    }).toList();
+  }
+
+  static Future<LyricsResult?> _fetchNetEaseCandidate(LyricSearchCandidate candidate) async {
+    try {
+      final data = await _neteaseLyricsClient.lyrics(candidate.id);
+      final lines = WordLyricsParser.yrc((data['yrc']?['lyric'] ?? '').toString());
+      if (_hasText(lines)) {
+        final wordTranslations = parseLrc((data['ytlrc']?['lyric'] ?? '').toString());
+        return _candidateResult(candidate, _mergeTranslations(lines,
+          wordTranslations.isNotEmpty ? wordTranslations : parseLrc((data['tlyric']?['lyric'] ?? '').toString()),
+          originalLrc: wordTranslations.isNotEmpty ? const [] : parseLrc((data['lrc']?['lyric'] ?? '').toString()),
+        ));
+      }
+      debugPrint('NetEase returned no YRC lines for song ${candidate.id}; using LRC');
+      final fallback = _resultFromRawLyrics(candidate,
+        (data['lrc']?['lyric'] ?? '').toString(), (data['tlyric']?['lyric'] ?? '').toString());
+      if (fallback != null) return fallback;
+    } catch (error) {
+      debugPrint('YRC unavailable, using LRC: $error');
+    }
+    final body = await _httpGet(
+      'https://music.163.com/api/song/lyric?id=${Uri.encodeComponent(candidate.id)}&lv=-1&tv=-1',
+      headers: const {'Referer': 'https://music.163.com'},
+    );
+    if (body == null) return null;
+    final data = _decodeNetEaseResponse(body);
+    return _resultFromRawLyrics(candidate, (data['lrc']?['lyric'] ?? '').toString(),
+      (data['tlyric']?['lyric'] ?? '').toString());
+  }
+
+  static Future<Map<String, dynamic>> _tencentRequest(String module, String method,
+      Map<String, dynamic> params, {bool desktop = false}) async {
+    final session = desktop || method == 'GetSession'
+        ? const <String, dynamic>{} : await _getTencentSession();
+    final request = await _client.postUrl(Uri.parse('https://u.y.qq.com/cgi-bin/musicu.fcg'))
+        .timeout(const Duration(seconds: 12));
+    request.headers.set('Referer', 'https://y.qq.com/');
+    request.headers.set('User-Agent', desktop ? kBiliUserAgent : 'okhttp/3.14.9');
+    request.headers.set('Cookie', 'tmeLoginType=-1;');
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({
+      'comm': desktop ? {'ct': 24, 'cv': 0, 'uin': 0, 'format': 'json'} : {
+        'ct': 11, 'cv': '1003006', 'v': '1003006', 'tmeAppID': 'qqmusiclight',
+        'os_ver': '15', 'nettype': 'NETWORK_WIFI', 'udid': '0',
+        'phonetype': '24122RKC7C', 'rom': 'Redmi/miro/miro:15/AE3A.240806.005/OS2.0.105.0.VOMCNXM:user/release-keys',
+        ...session,
+      },
+      'req': {'module': module, 'method': method, 'param': params},
+    }));
+    final response = await request.close().timeout(const Duration(seconds: 12));
+    final body = await response.transform(utf8.decoder).join().timeout(const Duration(seconds: 12));
+    if (response.statusCode != 200) throw LyricsRequestException('QQ request failed', code: response.statusCode);
+    final data = jsonDecode(body);
+    final result = data['req'];
+    if (data['code'] != 0 || result is! Map || result['code'] != 0 || result['data'] is! Map) {
+      if (!desktop) {
+        _tencentSession = null;
+      }
+      final requestCode = result is Map ? result['code'] : null;
+      throw LyricsRequestException('QQ $method failed (API ${data['code']}, request $requestCode)');
+    }
+    return Map<String, dynamic>.from(result['data'] as Map);
+  }
+
+  static Future<Map<String, dynamic>> _getTencentSession() async {
+    final pending = _tencentSession ??= () async {
+      final data = await _tencentRequest('music.getSession.session', 'GetSession',
+        {'caller': 0, 'uid': '0', 'vkey': 0});
+      final session = data['session'] as Map;
+      return <String, dynamic>{'uid': session['uid'], 'sid': session['sid'], 'userip': session['userip']};
+    }();
+    try { return await pending; }
+    catch (_) {
+      if (identical(_tencentSession, pending)) _tencentSession = null;
+      rethrow;
+    }
+  }
+
+  static Future<LyricsResult?> _fetchTencentWords(LyricSearchCandidate candidate) async {
+    var songId = candidate.songId;
+    var albumName = candidate.albumName;
+    var interval = candidate.durationSeconds;
+    var songName = candidate.title;
+    var singer = candidate.artist;
+    // Search results already contain the required catalog fields. Resolve
+    // details only for saved references that contain just a songmid.
+    if (songId == null || albumName == null || interval == null) {
+      final detail = await _tencentRequest('music.pf_song_detail_svr', 'get_song_detail_yqq', {
+        if (int.tryParse(candidate.id) != null) 'song_id': int.parse(candidate.id)
+        else 'song_mid': candidate.id,
+        'song_type': 0,
+      }, desktop: true);
+      final info = detail['track_info'];
+      if (info is! Map) {
+        throw const LyricsRequestException('QQ song detail is missing track_info');
+      }
+      songId = int.tryParse(info['id']?.toString() ?? '');
+      albumName = info['album']?['name']?.toString();
+      interval = int.tryParse(info['interval']?.toString() ?? '');
+      songName = (info['title'] ?? info['name'] ?? candidate.title).toString();
+      singer = (info['singer'] as List? ?? const []).whereType<Map>()
+          .map((entry) => entry['name']?.toString() ?? '').join('/');
+    }
+    if (songId == null || songId <= 0 || albumName == null || interval == null) {
+      throw const LyricsRequestException('QQ lyric metadata is incomplete');
+    }
+    String encoded(Object? value) => base64Encode(utf8.encode(value?.toString() ?? ''));
+    final data = await _tencentRequest('music.musichallSong.PlayLyricInfo', 'GetPlayLyricInfo', {
+      'songID': songId, 'songName': encoded(songName),
+      'singerName': encoded(singer), 'albumName': encoded(albumName),
+      'interval': interval, 'crypt': 1, 'ct': 19, 'cv': 2111,
+      'lrc_t': 0, 'qrc': 1, 'qrc_t': 0, 'roma': 0, 'roma_t': 0,
+      'trans': 1, 'trans_t': 0, 'type': 0,
+    });
+    String decode(Object? value) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isEmpty) return '';
+      return RegExp(r'^[0-9a-fA-F]+$').hasMatch(text)
+          ? WordLyricsParser.decryptQrc(text) : text;
+    }
+    final original = decode(data['lyric']);
+    var lines = WordLyricsParser.qrc(original);
+    if (!_hasText(lines)) lines = parseLrc(WordLyricsParser.qrcContent(original));
+    if (!_hasText(lines)) {
+      debugPrint('QQ returned no parseable lyrics for song ${candidate.id} (qrc_t: ${data['qrc_t']})');
+      return null;
+    }
+    List<LyricLine> translations = const [];
+    try {
+      final translated = decode(data['trans']);
+      translations = WordLyricsParser.qrc(translated);
+      if (!_hasText(translations)) translations = parseLrc(WordLyricsParser.qrcContent(translated));
+    } catch (error) { debugPrint('QRC translation unavailable: $error'); }
+    return _candidateResult(candidate, _mergeTranslations(lines, translations));
   }
 
   static String _decodeTencentText(String value) => value
@@ -1024,40 +1191,12 @@ class LyricsEngine {
             if (!matchesSongQuery(songName, query)) continue;
             final songId = song['id'];
             if (songId is! int || songId <= 0) continue;
-            final lyricUrl = 'https://music.163.com/api/song/lyric?id=$songId&lv=-1&tv=-1';
-
-            final lyricBody = await _httpGet(lyricUrl, headers: {'Referer': 'https://music.163.com'});
-            if (lyricBody != null) {
-              final lyricJson = _decodeNetEaseResponse(lyricBody);
-              final rawLrc = (lyricJson['lrc']?['lyric'] ?? '') as String;
-              final rawTrans = (lyricJson['tlyric']?['lyric'] ?? '') as String;
-
-              final lines = parseLrc(rawLrc);
-              final transLines = parseLrc(rawTrans);
-
-              if (transLines.isNotEmpty) {
-                // Both lists are time-sorted, so a single advancing pointer
-                // keeps the merge O(n) instead of the previous O(n²)
-                // firstWhere-scan per line.
-                var ti = 0;
-                for (var i = 0; i < lines.length; i++) {
-                  final line = lines[i];
-                  // Skip translations that are too early for this line.
-                  while (ti < transLines.length &&
-                      transLines[ti].time < line.time - 0.5) {
-                    ti++;
-                  }
-                  // ti is now the first translation inside the window, if any.
-                  if (ti < transLines.length &&
-                      (transLines[ti].time - line.time).abs() < 0.5) {
-                    lines[i] = LyricLine(
-                      time: line.time,
-                      text: line.text,
-                      translation: transLines[ti].text,
-                    );
-                  }
-                }
-              }
+            final lyricResult = await _fetchNetEaseCandidate(LyricSearchCandidate(
+              id: songId.toString(), title: songName, artist: artist ?? '',
+              provider: LyricProvider.netease,
+            ));
+            if (lyricResult != null) {
+              final lines = lyricResult.lines;
 
               if (lines.isNotEmpty) {
                 // Search-farm uploads are titled exactly like the query

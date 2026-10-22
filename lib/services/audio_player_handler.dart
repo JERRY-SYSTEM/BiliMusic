@@ -293,7 +293,11 @@ class BiliMusicAudioHandler extends BaseAudioHandler with SeekHandler {
     // and scroll animations. Both surfaces use this same position tick;
     // system metadata must never depend on an animation finishing.
     // Playback state is refreshed only for a metadata change, not every tick.
-    _player.positionStream.listen((position) {
+    _player.createPositionStream(
+      steps: 10000,
+      minPeriod: const Duration(milliseconds: 16),
+      maxPeriod: const Duration(milliseconds: 33),
+    ).listen((position) {
       _updateSystemLyric(position);
       _positionController.add(position);
       if (_playlist.isNotEmpty) _schedulePersist();

@@ -174,6 +174,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   final ValueNotifier<Duration> _durationNotifier =
       ValueNotifier(Duration.zero);
   final ValueNotifier<List<LyricLine>> _lyricsNotifier = ValueNotifier([]);
+  int _lyricLoadRevision = 0;
+  final Set<String> _upgradingLyrics = {};
   final ValueNotifier<double> _lyricsOffsetNotifier = ValueNotifier(0);
   final ValueNotifier<bool> _hasLyricsReferenceNotifier = ValueNotifier(false);
   /// Also a notifier, and for the same reason as the player state above: the
@@ -351,6 +353,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
   void _initListeners() {
     _subs.add(_audioHandler.currentTrackStream.listen((track) async {
+      final revision = ++_lyricLoadRevision;
       _currentTrack.value = track;
       if (track != null) {
         _lyricsNotifier.value = const [];
@@ -365,10 +368,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         // being handled resumes after its await regardless — and writing to a
         // disposed ValueNotifier throws.
         final selection = await DatabaseService.getLyricsSelection(track.id);
-        if (!mounted || _currentTrack.value?.id != track.id) return;
+        if (!mounted || revision != _lyricLoadRevision || _currentTrack.value?.id != track.id) return;
         _hasLyricsReferenceNotifier.value = selection != null;
         _lyricsOffsetNotifier.value = ((selection?['offset'] as num?) ?? 0).toDouble();
         var selected = await DatabaseService.getCachedLyrics(track.id);
+        if (!mounted || revision != _lyricLoadRevision || _currentTrack.value?.id != track.id) return;
         LyricsReference? reference;
         if (selection?['reference'] is Map) {
           reference = LyricsReference.fromMap(
@@ -386,20 +390,30 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           );
         }
         if (selected == null && reference != null) {
+          final previousLines = _lyricsNotifier.value;
           selected = await LyricsEngine.fetchReferenceLyrics(
             reference,
           );
+          if (!mounted ||
+              revision != _lyricLoadRevision ||
+              _currentTrack.value?.id != track.id ||
+              !identical(previousLines, _lyricsNotifier.value)) {
+            return;
+          }
           if (selected?.reference != null && selected!.lines.isNotEmpty) {
-            await DatabaseService.saveLyricsReference(
-              track.id,
-              selected.reference!,
-              lines: selected.lines,
-            );
+            final saved = await DatabaseService.cacheFetchedLyrics(
+              track.id, selected.reference!, selected.lines);
+            if (!saved) return;
+            if (!mounted || revision != _lyricLoadRevision || _currentTrack.value?.id != track.id) return;
             _hasLyricsReferenceNotifier.value = true;
           }
         }
-        if (!mounted || _currentTrack.value?.id != track.id) return;
+        if (!mounted || revision != _lyricLoadRevision || _currentTrack.value?.id != track.id) return;
         _lyricsNotifier.value = selected?.lines ?? const [];
+        if (selected != null && selected.needsWordLyricsUpgrade &&
+            selected.reference != null) {
+          unawaited(_upgradeLyrics(track.id, selected, revision));
+        }
       } else {
         _lyricsNotifier.value = const [];
         _lyricsOffsetNotifier.value = 0;
@@ -432,6 +446,27 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
       _isPlaying.value = _audioHandler.isPlaying;
       _positionNotifier.value = _audioHandler.position;
       _durationNotifier.value = Duration(seconds: restored.duration);
+    }
+  }
+
+  Future<void> _upgradeLyrics(String trackId, LyricsResult snapshot, int revision) async {
+    if (!_upgradingLyrics.add(trackId)) return;
+    try {
+      final fetched = await LyricsEngine.fetchReferenceLyrics(snapshot.reference!);
+      final saved = await DatabaseService.upgradeCachedLyrics(trackId, snapshot, fetched);
+      if (!saved ||
+          fetched == null ||
+          !mounted ||
+          revision != _lyricLoadRevision ||
+          _currentTrack.value?.id != trackId ||
+          !identical(_lyricsNotifier.value, snapshot.lines)) {
+        return;
+      }
+      _lyricsNotifier.value = fetched.lines;
+    } catch (error) {
+      debugPrint('Lyric cache upgrade failed: $error');
+    } finally {
+      _upgradingLyrics.remove(trackId);
     }
   }
 

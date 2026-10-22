@@ -52,7 +52,6 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialKeyword);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _search());
   }
 
   @override
@@ -190,7 +189,6 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                         : (provider) {
                             if (provider == null || provider == _provider) return;
                             setState(() => _provider = provider);
-                            _search();
                           },
                     ),
                   ),

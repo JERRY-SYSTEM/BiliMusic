@@ -207,10 +207,80 @@ class DatabaseService {
       'artist': reference.artist,
       'picture_url': reference.pictureUrl,
       'lines_json': lines == null
-          ? (existing.isEmpty ? null : existing.first['lines_json'])
-          : jsonEncode(lines.map((line) => line.toMap()).toList()),
+          ? (existing.isNotEmpty && existing.first['provider'] == reference.provider.apiName &&
+              existing.first['lyric_id'] == reference.id ? existing.first['lines_json'] : null)
+          : _encodeLyricCache(lines),
       'offset_ms': existing.isEmpty ? 0 : existing.first['offset_ms'],
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  });
+
+  static String _encodeLyricCache(List<LyricLine> lines) => jsonEncode({
+    'version': LyricsResult.currentCacheVersion,
+    'lines': lines.map((line) => line.toMap()).toList(),
+  });
+
+  /// Fill a cleared/missing cache only if a later manual choice has not
+  /// already populated it. Existing metadata and calibration remain intact.
+  static Future<bool> cacheFetchedLyrics(String trackId, LyricsReference reference,
+      List<LyricLine> lines) => _write((txn) async {
+    final rows = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [trackId]);
+    if (rows.isNotEmpty) {
+      final row = rows.first;
+      if (row['provider'] != reference.provider.apiName || row['lyric_id'] != reference.id) return false;
+      if (row['lines_json'] != null) {
+        try {
+          final decoded = jsonDecode(row['lines_json'] as String);
+          final rawLines = (decoded is Map ? decoded['lines'] : decoded) as List;
+          final current = rawLines.map((item) => LyricLine.fromMap(Map<String, dynamic>.from(item as Map)));
+          if (current.any((line) => line.text.trim().isNotEmpty)) return false;
+        } catch (_) { /* Replace an unreadable cache with the fetched lyrics. */ }
+      }
+      await txn.update('lyrics', {'lines_json': _encodeLyricCache(lines)},
+        where: 'track_id = ?', whereArgs: [trackId]);
+    } else {
+      await txn.insert('lyrics', {
+        'track_id': trackId, 'provider': reference.provider.apiName, 'lyric_id': reference.id,
+        'title': reference.title, 'artist': reference.artist, 'picture_url': reference.pictureUrl,
+        'lines_json': _encodeLyricCache(lines), 'offset_ms': 0,
+      });
+    }
+    return true;
+  });
+
+  /// Compare-and-swap protects manual reselection, cache clearing, and other
+  /// fetches while an old cache is being upgraded. A failed fetch is marked as
+  /// attempted without losing the old lines or modifying the calibration.
+  static Future<bool> upgradeCachedLyrics(String trackId, LyricsResult snapshot,
+      LyricsResult? fetched) => _write((txn) async {
+    final rows = await txn.query('lyrics', where: 'track_id = ?', whereArgs: [trackId]);
+    if (rows.isEmpty || snapshot.reference == null) return false;
+    final row = rows.first;
+    if (row['provider'] != snapshot.reference!.provider.apiName ||
+        row['lyric_id'] != snapshot.reference!.id ||
+        row['lines_json'] == null) {
+      return false;
+    }
+    final decoded = jsonDecode(row['lines_json'] as String);
+    final List raw;
+    final int version;
+    if (decoded is Map) {
+      version = (decoded['version'] as num?)?.toInt() ?? 1;
+      raw = decoded['lines'] as List;
+    } else {
+      version = 1;
+      raw = decoded as List;
+    }
+    if (version != snapshot.cacheVersion || version >= LyricsResult.currentCacheVersion) {
+      return false;
+    }
+    final current = raw.map((item) => LyricLine.fromMap(
+        Map<String, dynamic>.from(item as Map)).toMap()).toList();
+    if (jsonEncode(current) != jsonEncode(snapshot.lines.map((line) => line.toMap()).toList())) return false;
+    final lines = fetched != null && fetched.lines.any((line) => line.text.trim().isNotEmpty)
+        ? fetched.lines : snapshot.lines;
+    await txn.update('lyrics', {'lines_json': _encodeLyricCache(lines)},
+        where: 'track_id = ?', whereArgs: [trackId]);
+    return true;
   });
 
   static Future<LyricsResult?> getCachedLyrics(String trackId) async {
@@ -225,8 +295,16 @@ class DatabaseService {
       'pictureUrl': rows.first['picture_url'],
     });
     final List<LyricLine> lines;
+    var cacheVersion = 1;
     try {
-      final raw = jsonDecode(rows.first['lines_json'] as String) as List;
+      final decoded = jsonDecode(rows.first['lines_json'] as String);
+      final List raw;
+      if (decoded is Map) {
+        cacheVersion = (decoded['version'] as num?)?.toInt() ?? 1;
+        raw = decoded['lines'] as List;
+      } else {
+        raw = decoded as List;
+      }
       lines = raw
           .map((item) => LyricLine.fromMap(Map<String, dynamic>.from(item as Map)))
           .toList(growable: false);
@@ -236,6 +314,7 @@ class DatabaseService {
     if (lines.isEmpty) return null;
     return LyricsResult(
       source: reference.provider.apiName,
+      cacheVersion: cacheVersion,
       songTitle: reference.title,
       artistName: reference.artist,
       lines: lines,
@@ -285,7 +364,7 @@ class DatabaseService {
         'artist': reference.artist,
         'picture_url': reference.pictureUrl,
         'lines_json':
-            jsonEncode(result.lines.map((line) => line.toMap()).toList()),
+            _encodeLyricCache(result.lines),
         'offset_ms': old.isEmpty ? 0 : old.first['offset_ms'],
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       return updated;
