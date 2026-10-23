@@ -642,6 +642,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
               valueListenable: widget.lyricsOffsetNotifier,
               builder: (context, offset, _) => SyncedLyricsView(
                 lines: _isActive ? lines : const [],
+                isPlaying: _isActive && _isPlaying,
                 positionNotifier: widget.positionNotifier,
                 showTranslation: _showTranslation,
                 offset: offset,

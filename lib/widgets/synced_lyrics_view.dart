@@ -37,6 +37,7 @@ class SyncedLyricsView extends StatefulWidget {
   /// Whether the view should follow playback. False for a preview driven by a
   /// clock that never advances.
   final bool autoFollow;
+  final bool isPlaying;
   final bool showTranslation;
 
   const SyncedLyricsView({
@@ -49,6 +50,7 @@ class SyncedLyricsView extends StatefulWidget {
     this.calibrating = false,
     this.onCalibrateTap,
     this.autoFollow = true,
+    this.isPlaying = false,
     this.showTranslation = true,
   });
 
@@ -77,7 +79,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   TextScaler _textScaler = TextScaler.noScaling;
   TextDirection _textDirection = TextDirection.ltr;
 
-  static const Duration _browseGrace = Duration(seconds: 5);
+  static const Duration _browseGrace = Duration(seconds: 3);
 
   /// Average human auditory reaction time. The user always taps slightly
   /// *after* they hear the line start, so we subtract this from the raw
@@ -93,11 +95,23 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       offsetSeconds: widget.offset,
     );
     widget.positionNotifier.addListener(_onPosition);
+    _positionAfterLayout();
+  }
+
+  void _positionAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.autoFollow && !_userBrowsing) {
+        _scrollToActive(animate: false);
+      }
+    });
   }
 
   @override
   void didUpdateWidget(covariant SyncedLyricsView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.isPlaying || !widget.autoFollow) {
+      _resumeTimer?.cancel();
+    }
     if (oldWidget.positionNotifier != widget.positionNotifier) {
       oldWidget.positionNotifier.removeListener(_onPosition);
       widget.positionNotifier.addListener(_onPosition);
@@ -109,6 +123,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       _heightCache.clear();
       _selectionIndex = null;
       _onPosition(force: true);
+      _positionAfterLayout();
     }
   }
 
@@ -176,9 +191,13 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   }
 
   void _scheduleResume() {
-    if (!widget.autoFollow) return;
     _resumeTimer?.cancel();
-    _resumeTimer = Timer(_browseGrace, _resumeFollowing);
+    if (!widget.autoFollow || !widget.isPlaying || !_userBrowsing) return;
+    _resumeTimer = Timer(_browseGrace, () {
+      if (widget.autoFollow && widget.isPlaying && _userBrowsing) {
+        _resumeFollowing();
+      }
+    });
   }
 
   void _resumeFollowing() {
@@ -315,7 +334,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                   _updateSelection();
                 } else if (notification is ScrollEndNotification &&
                     _userBrowsing) {
-                  if (widget.onSeek == null) _scheduleResume();
+                  _scheduleResume();
                 }
                 return false;
               },
