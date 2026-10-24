@@ -213,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: cover != null && cover.isNotEmpty
-                      ? CachedCoverImage(url: cover, width: 40, height: 40)
+                      ? CachedCoverImage(url: cover, width: 40, height: 40, playlistCover: true)
                       : Container(
                           width: 40,
                           height: 40,
@@ -297,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.sm),
               child: pl.coverUrl != null && pl.coverUrl!.isNotEmpty
-                  ? CachedCoverImage(url: pl.coverUrl!, width: 54, height: 54)
+                  ? CachedCoverImage(url: pl.coverUrl!, width: 54, height: 54, playlistCover: true)
                   : Container(
                       width: 54,
                       height: 54,

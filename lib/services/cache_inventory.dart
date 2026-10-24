@@ -8,8 +8,7 @@ import '../models/track.dart';
 import '../widgets/cached_cover_image.dart';
 import 'app_database.dart';
 
-/// A user-facing cache bucket. A bucket contains every cache artifact that can
-/// be confidently attributed to one song; everything else is [other].
+/// Only complete audio, artwork and lyrics belong to a song bucket.
 class CacheBucket {
   const CacheBucket({required this.track, required this.files, this.lyricsBytes = 0, this.coverFiles = const [], this.extraBytes = 0, this.lyricTrackIds = const []});
   final Track? track;
@@ -33,6 +32,25 @@ class CacheInventory {
       for (final track in tracks) track.id: CacheBucket(track: track, files: <File>[]),
     };
     final coverOwnerByPath = <String, String>{};
+    final db = await AppDatabase.instance;
+    for (final row in await db.query('tracks')) {
+      final track = Track.fromMap(AppDatabase.decode(row['payload']));
+      buckets.putIfAbsent(track.id, () => CacheBucket(track: track, files: <File>[]));
+    }
+    // Protect thumbnails created before playlist artwork had its own directory.
+    final playlistKeys = <String>{};
+    final playlistPaths = <String>{};
+    for (final row in await db.query('playlists')) {
+      final url = AppDatabase.decode(row['payload'])['coverUrl'] as String?;
+      if (url == null || url.isEmpty) continue;
+      if (CachedCoverImage.isLocalPath(url)) {
+        playlistPaths.add(File(CachedCoverImage.localPathOf(url)).absolute.path);
+        continue;
+      }
+      for (var size = 1; size <= 1080; size++) {
+        playlistKeys.add(md5.convert(utf8.encode(CachedCoverImage.sizedUrl(url, size, size))).toString());
+      }
+    }
     for (final row in await AppDatabase.coverCaches()) {
       try {
         final track = Track.fromMap(AppDatabase.decode(row['track_payload']));
@@ -64,41 +82,71 @@ class CacheInventory {
       }
     }
     final coverByTrack = <String, List<File>>{};
+    final localCoverOwners = {
+      for (final bucket in buckets.values)
+        if (CachedCoverImage.isLocalPath(bucket.track!.coverUrl))
+          File(CachedCoverImage.localPathOf(bucket.track!.coverUrl)).absolute.path: bucket.track!.id,
+    };
+    final customCovers = Directory('${docs.path}/bilimusic_covers');
+    if (await customCovers.exists()) {
+      await for (final entity in customCovers.list(followLinks: false)) {
+        if (entity is! File || playlistPaths.contains(entity.absolute.path)) continue;
+        final owner = localCoverOwners[entity.absolute.path];
+        if (owner == null) {
+          otherFiles.add(entity);
+        } else {
+          (coverByTrack[owner] ??= []).add(entity);
+        }
+      }
+    }
     final audioDir = Directory('${docs.path}/bilimusic_audio');
     final audioOwners = {for (final row in await AppDatabase.downloads()) row['path'] as String: row['track_id'] as String};
     if (await audioDir.exists()) {
       for (final entity in await audioDir.list().toList()) {
         if (entity is! File) continue;
-        final bucket = buckets[audioOwners[entity.path]];
+        final bucket = entity.path.endsWith('.m4a') ? buckets[audioOwners[entity.path]] : null;
         (bucket?.files ?? otherFiles).add(entity);
       }
     }
     final coversDir = Directory('${support.path}/bilimusic_covers');
+    Map<String, Track>? legacyOwners;
+    Map<String, Track> buildLegacyOwners() {
+      final owners = <String, Track>{};
+      for (final bucket in buckets.values) {
+        final track = bucket.track!;
+        if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
+        final systemKey = md5.convert(utf8.encode(track.coverUrl)).toString();
+        owners.putIfAbsent('system_$systemKey.jpg', () => track);
+        for (var size = 1; size <= 1080; size++) {
+          final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
+          owners.putIfAbsent('img_$key.img', () => track);
+        }
+      }
+      return owners;
+    }
     if (await coversDir.exists()) {
       for (final entity in await coversDir.list().toList()) {
         if (entity is! File) continue;
-        final registeredId = coverOwnerByPath[entity.path] ??
-            (entity.path.endsWith('.part')
-                ? coverOwnerByPath[entity.path.substring(0, entity.path.length - 5)]
-                : null);
-        Track? owner = buckets[registeredId]?.track;
-        // Retain hash matching for cache files created before ownership was
-        // persisted. All new files take the exact-path branch above.
-        for (final track in owner == null
-            ? buckets.values.map((bucket) => bucket.track!).toList()
-            : const <Track>[]) {
-          if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
-          for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
-            final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
-            if (entity.path.contains(key)) { owner = track; break; }
-          }
-          if (owner != null) break;
+        final name = entity.uri.pathSegments.last;
+        if (playlistKeys.any((key) => name == 'img_$key.img')) continue;
+        if (name.endsWith('.part')) {
+          otherFiles.add(entity);
+          continue;
         }
+        final registeredId = coverOwnerByPath[entity.path];
+        final owner = buckets[registeredId]?.track ??
+            (legacyOwners ??= buildLegacyOwners())[name];
         if (owner == null) {
           otherFiles.add(entity);
         } else {
           (coverByTrack[owner.id] ??= []).add(entity);
         }
+      }
+    }
+    final temporary = await getTemporaryDirectory();
+    if (await temporary.exists()) {
+      await for (final entity in temporary.list(recursive: true, followLinks: false)) {
+        if (entity is File) otherFiles.add(entity);
       }
     }
     final result = <CacheBucket>[
@@ -111,7 +159,9 @@ class CacheInventory {
       if (otherFiles.isNotEmpty || otherBytes > 0)
         CacheBucket(track: null, files: otherFiles, extraBytes: otherBytes, lyricTrackIds: otherLyrics),
     ];
-    result.sort((a, b) => a.isOther == b.isOther ? 0 : (a.isOther ? -1 : 1));
+    result.removeWhere((bucket) => bucket.bytes == 0);
+    final sizes = {for (final bucket in result) bucket: bucket.bytes};
+    result.sort((a, b) => sizes[b]!.compareTo(sizes[a]!));
     return result;
   }
 }

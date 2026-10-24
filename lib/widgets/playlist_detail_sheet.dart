@@ -695,7 +695,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: cover != null && cover.isNotEmpty && !_isVirtualDownloads
-            ? CachedCoverImage(url: cover, width: 72, height: 72)
+            ? CachedCoverImage(url: cover, width: 72, height: 72, playlistCover: true)
             : DecoratedBox(
                 key: const Key('playlistDefaultArtwork'),
                 decoration: BoxDecoration(

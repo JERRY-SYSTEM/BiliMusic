@@ -29,6 +29,7 @@ class CachedCoverImage extends StatefulWidget {
   final double height;
   final BoxFit fit;
   final Track? track;
+  final bool playlistCover;
 
   const CachedCoverImage({
     super.key,
@@ -37,6 +38,7 @@ class CachedCoverImage extends StatefulWidget {
     required this.height,
     this.fit = BoxFit.cover,
     this.track,
+    this.playlistCover = false,
   });
 
   /// Appends Bilibili CDN resize params when the host supports them.
@@ -55,7 +57,8 @@ class CachedCoverImage extends StatefulWidget {
   }
 
   static bool isLocalPath(String url) =>
-      url.startsWith('/') || url.startsWith('file://');
+      url.startsWith('/') || url.startsWith('file://') ||
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(url);
 
   static String localPathOf(String url) =>
       url.startsWith('file://') ? url.substring('file://'.length) : url;
@@ -134,7 +137,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   void didUpdateWidget(covariant CachedCoverImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final sourceChanged = oldWidget.url != widget.url ||
-        oldWidget.track?.id != widget.track?.id;
+        oldWidget.track?.id != widget.track?.id ||
+        oldWidget.playlistCover != widget.playlistCover;
     if (sourceChanged) {
       _loadKey = widget.url;
       _loadStarted = false;
@@ -266,17 +270,23 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       // Application Support, not the temp dir: iOS/Android may purge temp
       // under storage pressure, which silently re-downloaded every cover.
       final supportDir = await getApplicationSupportDirectory();
-      final cacheDir = Directory('${supportDir.path}/bilimusic_covers');
+      final cacheDir = Directory('${supportDir.path}/${widget.playlistCover ? 'bilimusic_playlist_covers' : 'bilimusic_covers'}');
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
       }
       final md5Key = md5.convert(utf8.encode(fetchUrl)).toString();
       final file = File('${cacheDir.path}/img_$md5Key.img');
+      if (widget.playlistCover && !await file.exists()) {
+        final legacy = File('${supportDir.path}/bilimusic_covers/img_$md5Key.img');
+        if (await legacy.exists() && await legacy.length() > 0) {
+          await legacy.copy(file.path);
+        }
+      }
 
       // Persist ownership before touching the network. Cache management can
       // now show the song while its visible cover is still downloading, and
       // exact paths avoid misclassifying uncommon thumbnail sizes as “其它”.
-      if (cacheOwner != null) {
+      if (cacheOwner != null && !widget.playlistCover) {
         await AppDatabase.registerCoverCache(
           cacheOwner,
           fetchUrl,
@@ -290,19 +300,19 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       }
 
       final _CoverLoadResult cached;
-      final existing = _inFlight[fetchUrl];
+      final existing = _inFlight[file.path];
       if (existing != null) {
         cached = await existing;
       } else {
         final future = _downloadAndCache(fetchUrl, file);
-        _inFlight[fetchUrl] = future;
+        _inFlight[file.path] = future;
         try {
           cached = await future;
         } finally {
-          _inFlight.remove(fetchUrl);
+          _inFlight.remove(file.path);
         }
       }
-      if (cacheOwner != null && cached.file != null) {
+      if (cacheOwner != null && !widget.playlistCover && cached.file != null) {
         await AppDatabase.registerCoverCache(
           cacheOwner,
           fetchUrl,

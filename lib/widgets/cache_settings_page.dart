@@ -122,7 +122,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       secondary: track == null ? HugeIcon(icon: HugeIcons.strokeRoundedFolderUnknown, color: context.palette.accent) : (track.coverUrl.isEmpty ? HugeIcon(icon: HugeIcons.strokeRoundedHeadphones, color: context.palette.accent) : ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: CachedCoverImage(url: track.coverUrl, width: 48, height: 48))),
       title: Text(track?.title ?? '其它', maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: track == null
-          ? const Text('无法关联到具体歌曲的缓存', maxLines: 1, overflow: TextOverflow.ellipsis)
+          ? Text('临时文件及其它可清理缓存 · ${_formatBytes(bucket.bytes)}', maxLines: 2, overflow: TextOverflow.ellipsis)
           : Row(
               children: [
                 Expanded(
